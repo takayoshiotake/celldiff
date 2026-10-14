@@ -1,6 +1,6 @@
 use celldiff::{
     AppError,
-    compare::compare,
+    compare::compare_all,
     input::CsvInput,
     output::{Report, validate_paths},
 };
@@ -28,7 +28,7 @@ fn run(args: Args) -> Result<bool, AppError> {
     let mut after = CsvInput::open(&args.after)?;
     validate_paths(&args.before, &args.after, &args.output, args.force)?;
     let mut report = Report::new()?;
-    let summary = compare(&mut before, &mut after, |d| report.write(d))?;
+    let summary = compare_all(&mut before, &mut after, |d| report.write(d))?;
     report.save(&args.output, args.force, summary, &args.before, &args.after)?;
     println!(
         "changed_cells={} changed_records={} modified={} added={} removed={} output={}",

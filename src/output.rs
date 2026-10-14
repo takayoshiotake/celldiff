@@ -4,14 +4,14 @@ use crate::{
     compare::{CellDifference, Summary},
     text,
 };
-use rust_xlsxwriter::{Color, Format, Workbook, Worksheet};
+use rust_xlsxwriter::{Color, Format, Workbook};
 use similar::ChangeTag;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
-pub const MAX_DIFFERENCES: u64 = 1_048_575;
+pub const MAX_RECORDS: u64 = 1_048_576;
+pub const MAX_COLUMNS: usize = 16_384;
 pub const MAX_TEXT_UNITS: usize = 32_767;
-const MAX_EXACT_INTEGER: u64 = 9_007_199_254_740_991;
 
 fn fail(message: impl Into<String>) -> AppError {
     std::io::Error::other(message.into()).into()
@@ -24,11 +24,9 @@ pub fn validate_text(value: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn validate_row(row: u64) -> Result<(), AppError> {
-    if row > MAX_DIFFERENCES {
-        return Err(fail(
-            "Report exceeds Excel's row limit (1048575 differences)",
-        ));
+pub fn validate_position(record: u64, column: usize) -> Result<(), AppError> {
+    if record == 0 || record > MAX_RECORDS || column == 0 || column > MAX_COLUMNS {
+        return Err(fail(format!("Record {record}, column {column} exceeds Excel's 1048576-row / 16384-column bounds")));
     }
     Ok(())
 }
@@ -64,11 +62,14 @@ pub fn validate_paths(
 
 pub struct Report {
     workbook: Workbook,
-    rows: u64,
+    columns: usize,
     normal: Format,
     removed: Format,
     added: Format,
     cell: Format,
+    modified_cell: Format,
+    added_cell: Format,
+    removed_cell: Format,
 }
 
 impl Report {
@@ -76,30 +77,10 @@ impl Report {
         let mut workbook = Workbook::new();
         let sheet = workbook.add_worksheet_with_constant_memory();
         sheet.set_name("Differences")?;
-        sheet.set_freeze_panes(1, 0)?;
-        for col in 0..7 {
-            sheet.set_column_width(col, if col >= 5 { 45 } else { 18 })?;
-        }
-        let header = Format::new()
-            .set_bold()
-            .set_background_color(Color::RGB(0xE5E7EB));
-        for (column, name) in [
-            "Record",
-            "Column",
-            "Kind",
-            "Before present",
-            "After present",
-            "Before",
-            "After",
-        ]
-        .iter()
-        .enumerate()
-        {
-            sheet.write_string_with_format(0, column as u16, *name, &header)?;
-        }
+        // No metadata header: CSV record 1, field 1 stays at Excel A1.
         Ok(Self {
             workbook,
-            rows: 0,
+            columns: 0,
             normal: Format::new(),
             removed: Format::new()
                 .set_font_color(Color::RGB(0xB91C1C))
@@ -108,63 +89,62 @@ impl Report {
                 .set_font_color(Color::RGB(0x1D4ED8))
                 .set_bold(),
             cell: Format::new().set_text_wrap(),
+            modified_cell: Format::new().set_text_wrap().set_background_color(Color::RGB(0xFEF9C3)),
+            added_cell: Format::new().set_text_wrap().set_background_color(Color::RGB(0xDBEAFE)),
+            removed_cell: Format::new().set_text_wrap().set_background_color(Color::RGB(0xFEE2E2)),
         })
     }
 
-    pub fn write(&mut self, difference: CellDifference<'_>) -> Result<(), AppError> {
-        validate_row(self.rows + 1)?;
-        for value in [difference.before, difference.after].into_iter().flatten() {
-            validate_text(value).map_err(|error| {
-                fail(format!(
-                    "Record {}, column {}: {error}",
-                    difference.record, difference.column
-                ))
-            })?;
+    pub fn write(&mut self, cell: CellDifference<'_>) -> Result<(), AppError> {
+        validate_position(cell.record, cell.column)?;
+        if cell.column > self.columns {
+            self.workbook.worksheet_from_index(0)?.set_column_range_width(self.columns as u16, (cell.column - 1) as u16, 24)?;
+            self.columns = cell.column;
         }
-        let parts = text::segments(
-            difference.before.unwrap_or(""),
-            difference.after.unwrap_or(""),
-        );
-        let row = (self.rows + 1) as u32;
-        let sheet = self.workbook.worksheet_from_index(0)?;
-        write_index(sheet, row, 0, difference.record)?;
-        write_index(sheet, row, 1, difference.column as u64)?;
-        sheet.write_string(row, 2, difference.kind().as_str())?;
-        sheet.write_boolean(row, 3, difference.before.is_some())?;
-        sheet.write_boolean(row, 4, difference.after.is_some())?;
-        for (column, value, excluded) in [
-            (5, difference.before, ChangeTag::Insert),
-            (6, difference.after, ChangeTag::Delete),
-        ] {
-            if let Some(value) = value {
-                let fragments: Vec<_> = parts
-                    .iter()
-                    .filter(|p| p.tag != excluded)
-                    .map(|p| {
-                        let format = match p.tag {
-                            ChangeTag::Equal => &self.normal,
-                            ChangeTag::Delete => &self.removed,
-                            ChangeTag::Insert => &self.added,
-                        };
-                        (format, p.value.as_str())
-                    })
-                    .collect();
-                if fragments.len() >= 2 {
-                    sheet.write_rich_string_with_format(row, column, &fragments, &self.cell)?;
-                } else if let Some((format, _)) = fragments.first() {
-                    sheet.write_string_with_format(
-                        row,
-                        column,
-                        value,
-                        &format.merge(&self.cell),
-                    )?;
-                } else {
-                    // Presence columns distinguish present-empty from missing.
+        let differs = cell.before != cell.after;
+        let row = (cell.record - 1) as u32;
+        let column = (cell.column - 1) as u16;
+        let error_at = |error| fail(format!("Record {}, column {}: {error}", cell.record, cell.column));
+        for value in [cell.before, cell.after].into_iter().flatten() {
+            validate_text(value).map_err(error_at)?;
+        }
+        if !differs {
+            let sheet = self.workbook.worksheet_from_index(0)?;
+            if let Some(value) = cell.after {
+                if value.is_empty() {
                     sheet.write_blank(row, column, &self.cell)?;
+                } else {
+                    sheet.write_string_with_format(row, column, value, &self.cell)?;
                 }
             }
+            return Ok(());
         }
-        self.rows += 1;
+        let parts = text::segments(cell.before.unwrap_or(""), cell.after.unwrap_or(""));
+        let combined: String = parts.iter().map(|part| part.value.as_str()).collect();
+        // Replacements show removed + inserted text in the same cell.
+        // Validate the rendered text too: two valid inputs may exceed the XLSX limit together.
+        validate_text(&combined).map_err(error_at)?;
+        let format = match cell.kind() {
+            crate::compare::ChangeKind::Modified => &self.modified_cell,
+            crate::compare::ChangeKind::Added => &self.added_cell,
+            crate::compare::ChangeKind::Removed => &self.removed_cell,
+        };
+        let fragments: Vec<_> = parts.iter().map(|part| {
+            let font = match part.tag {
+                ChangeTag::Equal => &self.normal,
+                ChangeTag::Delete => &self.removed,
+                ChangeTag::Insert => &self.added,
+            };
+            (font, part.value.as_str())
+        }).collect();
+        let sheet = self.workbook.worksheet_from_index(0)?;
+        if fragments.len() >= 2 {
+            sheet.write_rich_string_with_format(row, column, &fragments, format)?;
+        } else if let Some((font, _)) = fragments.first() {
+            sheet.write_string_with_format(row, column, &combined, &font.merge(format))?;
+        } else {
+            sheet.write_blank(row, column, format)?;
+        }
         Ok(())
     }
 
@@ -203,13 +183,15 @@ impl Report {
                 "Comparison",
                 "Positional; first record included; UTF-8; no normalization".into(),
             ),
-            ("Removed text", "Red with strikethrough in Before".into()),
-            ("Added text", "Blue and bold in After".into()),
+            ("Removed text", "Red with strikethrough within each original cell".into()),
+            ("Added text", "Blue and bold within each original cell".into()),
             (
                 "Empty vs missing",
-                "See Before present and After present columns".into(),
+                "Blue fill: added cell; red fill: removed cell; yellow: modified".into(),
             ),
             ("Character unit", "Unicode grapheme cluster".into()),
+            ("Layout", "CSV coordinates preserved; unchanged cells included; no extra header".into()),
+            ("Cell text", "Removed and inserted segments are combined; this is a visual diff".into()),
         ];
         for (row, (label, value)) in entries.iter().enumerate() {
             sheet.write_string(row as u32, 0, *label)?;
@@ -241,23 +223,16 @@ impl Report {
     }
 }
 
-fn write_index(sheet: &mut Worksheet, row: u32, column: u16, value: u64) -> Result<(), AppError> {
-    if value <= MAX_EXACT_INTEGER {
-        sheet.write_number(row, column, value as f64)?;
-    } else {
-        sheet.write_string(row, column, value.to_string())?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     #[test]
     fn limits_are_checked_without_truncation() {
-        assert!(validate_row(MAX_DIFFERENCES).is_ok());
-        assert!(validate_row(MAX_DIFFERENCES + 1).is_err());
+        assert!(validate_position(MAX_RECORDS, MAX_COLUMNS).is_ok());
+        assert!(validate_position(MAX_RECORDS + 1, 1).is_err());
+        assert!(validate_position(1, MAX_COLUMNS + 1).is_err());
+        assert!(validate_position(0, 1).is_err());
         assert!(validate_text(&"a".repeat(MAX_TEXT_UNITS)).is_ok());
         assert!(validate_text(&"a".repeat(MAX_TEXT_UNITS + 1)).is_err());
         assert!(validate_text(&"😀".repeat(16384)).is_err());

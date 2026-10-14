@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import zipfile
+import xml.etree.ElementTree as ET
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", type=Path, required=True)
@@ -21,6 +22,16 @@ with tempfile.TemporaryDirectory() as folder:
         assert archive.testzip() is None
         sheet = archive.read("xl/worksheets/sheet1.xml").decode()
         assert "FFB91C1C" in sheet and "FF1D4ED8" in sheet
+        ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        grid = ET.fromstring(sheet)
+        assert grid.find("s:dimension", ns).get("ref") == "A1:C5"
+        def cell_text(address):
+            cell = grid.find(f".//s:c[@r='{address}']", ns)
+            return "".join(node.text or "" for node in cell.findall(".//s:t", ns))
+        assert cell_text("A1") == "id"
+        assert cell_text("A2") == "001"
+        assert cell_text("B2") == "東京大阪本社"
+        assert cell_text("A5") == "004"
     again = subprocess.run(command, text=True, capture_output=True)
     assert again.returncode == 2
     identical = subprocess.run([str(binary), "examples/before.csv", "examples/before.csv", "-o",

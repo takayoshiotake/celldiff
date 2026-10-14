@@ -62,95 +62,108 @@ fn fixture(
 }
 
 #[test]
-fn partial_formats_work_in_constant_memory_and_preserve_original_values() {
+fn original_coordinates_and_partial_formats_are_preserved() {
     let (_dir, before, after, output) = fixture(
-        "001,東京本社,=1+1,\"a\nb\"\n".as_bytes(),
-        "001,大阪本社,=2+2,\"a\nc\"\n".as_bytes(),
+        "id,name,note\n001,東京本社,\"a\nb\"\n002,same,=1+1\n".as_bytes(),
+        "id,name,note\n001,大阪本社,\"a\nc\"\n002,same,=2+2\n".as_bytes(),
     );
     let result = execute(&before, &after, &output, false);
-    assert_eq!(
-        result.status.code(),
-        Some(1),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    assert_eq!(result.status.code(), Some(1), "{}", String::from_utf8_lossy(&result.stderr));
     assert!(String::from_utf8_lossy(&result.stdout).contains("changed_cells=3"));
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
-    assert_eq!(cell_text(&sheet, "F2"), "東京本社");
-    assert_eq!(cell_text(&sheet, "G2"), "大阪本社");
-    assert_eq!(cell_text(&sheet, "F3"), "=1+1");
-    assert_eq!(cell_text(&sheet, "G3"), "=2+2");
-    assert_eq!(cell_text(&sheet, "F4"), "a\nb");
+    assert_eq!(cell_text(&sheet, "A1"), "id");
+    assert_eq!(cell_text(&sheet, "B1"), "name");
+    assert_eq!(cell_text(&sheet, "A2"), "001");
+    assert_eq!(cell_text(&sheet, "B2"), "東京大阪本社");
+    assert_eq!(cell_text(&sheet, "C2"), "a\nbc");
+    assert_eq!(cell_text(&sheet, "B3"), "same");
+    assert_eq!(cell_text(&sheet, "C3"), "=12+12");
     assert!(sheet.contains("<strike"));
-    assert!(sheet.contains("FFB91C1C"));
-    assert!(sheet.contains("FF1D4ED8"));
+    assert!(sheet.contains("FFB91C1C") && sheet.contains("FF1D4ED8"));
     let doc = roxmltree::Document::parse(&sheet).unwrap();
     assert!(!doc.descendants().any(|n| n.has_tag_name("f")));
-    assert!(
-        doc.descendants()
-            .filter(|n| n.has_tag_name("c")
-                && n.attribute("r")
-                    .is_some_and(|r| r.starts_with('F') || r.starts_with('G')))
-            .all(|n| n.attribute("t") == Some("inlineStr"))
-    );
-    // A following row must not erase the previous row's rich text.
-    assert!(doc.descendants().filter(|n| n.has_tag_name("row")).count() == 4);
+    assert_eq!(doc.descendants().filter(|n| n.has_tag_name("row")).count(), 3);
+    assert_eq!(doc.descendants().find(|n| n.has_tag_name("dimension")).unwrap().attribute("ref"), Some("A1:C3"));
 }
 
 #[test]
-fn empty_and_missing_have_different_presence_flags() {
+fn empty_added_and_removed_cells_have_distinct_fills_without_extra_columns() {
     let (_dir, before, after, output) = fixture(b"a,\n", b"a\nnew,\n");
-    let result = execute(&before, &after, &output, false);
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(1));
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
-    let doc = roxmltree::Document::parse(&sheet).unwrap();
-    let flag = |addr| {
-        doc.descendants()
-            .find(|n| n.has_tag_name("c") && n.attribute("r") == Some(addr))
-            .unwrap()
-            .descendants()
-            .find(|n| n.has_tag_name("v"))
-            .unwrap()
-            .text()
-            .unwrap()
+    let styles = xml(&output, "xl/styles.xml");
+    let document = roxmltree::Document::parse(&sheet).unwrap();
+    let style_document = roxmltree::Document::parse(&styles).unwrap();
+    let fill_color = |address| {
+        let cell = document.descendants().find(|n| n.has_tag_name("c") && n.attribute("r") == Some(address)).unwrap();
+        let index: usize = cell.attribute("s").unwrap().parse().unwrap();
+        let xfs = style_document.descendants().find(|n| n.has_tag_name("cellXfs")).unwrap();
+        let xf = xfs.children().filter(|n| n.is_element()).nth(index).unwrap();
+        let fill_id: usize = xf.attribute("fillId").unwrap().parse().unwrap();
+        let fills = style_document.descendants().find(|n| n.has_tag_name("fills")).unwrap();
+        fills.children().filter(|n| n.is_element()).nth(fill_id).unwrap()
+            .descendants().find(|n| n.has_tag_name("fgColor")).unwrap().attribute("rgb").unwrap().to_string()
     };
-    assert_eq!(cell_text(&sheet, "C2"), "Removed");
-    assert_eq!(flag("D2"), "1");
-    assert_eq!(flag("E2"), "0");
-    assert_eq!(cell_text(&sheet, "C4"), "Added");
-    assert_eq!(flag("D4"), "0");
-    assert_eq!(flag("E4"), "1");
+    assert_eq!(cell_text(&sheet, "A1"), "a");
+    assert_eq!(cell_text(&sheet, "A2"), "new");
+    assert_eq!(fill_color("B1"), "FFFEE2E2");
+    assert_eq!(fill_color("B2"), "FFDBEAFE");
+    assert_eq!(document.descendants().find(|n| n.has_tag_name("dimension")).unwrap().attribute("ref"), Some("A1:B2"));
 }
 
 #[test]
-fn identical_and_empty_inputs_still_generate_reports() {
+fn identical_and_empty_inputs_preserve_the_full_grid() {
     for input in [b"a,b\n".as_slice(), b"".as_slice()] {
         let (_dir, before, after, output) = fixture(input, input);
         let result = execute(&before, &after, &output, false);
         assert_eq!(result.status.code(), Some(0));
-        assert!(String::from_utf8_lossy(&result.stdout).contains("changed_cells=0"));
         let sheet = xml(&output, "xl/worksheets/sheet1.xml");
         let doc = roxmltree::Document::parse(&sheet).unwrap();
-        assert_eq!(
-            doc.descendants().filter(|n| n.has_tag_name("row")).count(),
-            1
-        );
+        assert_eq!(doc.descendants().filter(|n| n.has_tag_name("row")).count(), usize::from(!input.is_empty()));
+        if !input.is_empty() {
+            assert_eq!(cell_text(&sheet, "A1"), "a");
+            assert_eq!(cell_text(&sheet, "B1"), "b");
+        }
         xml(&output, "xl/worksheets/sheet2.xml");
     }
 }
 
 #[test]
-fn complete_value_changes_keep_leading_zeros_and_formula_like_text() {
-    let (_dir, before, after, output) = fixture(b"001,=1\n", b"002,+2\n");
-    assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
-        Some(1)
-    );
+fn strings_keep_leading_zeros_and_formula_like_values() {
+    let (_dir, before, after, output) = fixture(b"001,=1\n", b"001,+2\n");
+    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(1));
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
-    assert_eq!(cell_text(&sheet, "F2"), "001");
-    assert_eq!(cell_text(&sheet, "G2"), "002");
-    assert_eq!(cell_text(&sheet, "F3"), "=1");
-    assert_eq!(cell_text(&sheet, "G3"), "+2");
+    assert_eq!(cell_text(&sheet, "A1"), "001");
+    assert_eq!(cell_text(&sheet, "B1"), "=1+2");
+    let doc = roxmltree::Document::parse(&sheet).unwrap();
+    assert!(!doc.descendants().any(|n| n.has_tag_name("f")));
+}
+
+#[test]
+fn unchanged_rows_are_not_collapsed_when_only_a_later_cell_changes() {
+    let (_dir, before, after, output) = fixture(b"a,b\nc,d\ne,f\n", b"a,b\nc,d\ne,g\n");
+    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(1));
+    let sheet = xml(&output, "xl/worksheets/sheet1.xml");
+    assert_eq!(cell_text(&sheet, "B1"), "b");
+    assert_eq!(cell_text(&sheet, "B2"), "d");
+    assert_eq!(cell_text(&sheet, "B3"), "fg");
+}
+
+#[test]
+fn combined_replacement_limit_does_not_truncate_or_publish() {
+    let old = format!("{}\n", "a".repeat(20000));
+    let new = format!("{}\n", "b".repeat(20000));
+    let (_dir, before, after, output) = fixture(old.as_bytes(), new.as_bytes());
+    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(2));
+    assert!(!output.exists());
+}
+
+#[test]
+fn too_many_input_columns_are_rejected_even_when_identical() {
+    let input = vec!["a"; 16385].join(",");
+    let (_dir, before, after, output) = fixture(input.as_bytes(), input.as_bytes());
+    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(2));
+    assert!(!output.exists());
 }
 
 #[test]

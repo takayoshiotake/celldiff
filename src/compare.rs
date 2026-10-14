@@ -47,9 +47,28 @@ pub struct Summary {
     pub removed: u64,
 }
 
+/// Visit changed cells only.
 pub fn compare<R: Read, S: Read>(
     before: &mut CsvInput<R>,
     after: &mut CsvInput<S>,
+    emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
+) -> Result<Summary, AppError> {
+    compare_impl(before, after, false, emit)
+}
+
+/// Visit every existing cell in row-major order, including unchanged values.
+pub fn compare_all<R: Read, S: Read>(
+    before: &mut CsvInput<R>,
+    after: &mut CsvInput<S>,
+    emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
+) -> Result<Summary, AppError> {
+    compare_impl(before, after, true, emit)
+}
+
+fn compare_impl<R: Read, S: Read>(
+    before: &mut CsvInput<R>,
+    after: &mut CsvInput<S>,
+    include_unchanged: bool,
     mut emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
 ) -> Result<Summary, AppError> {
     let mut old = StringRecord::new();
@@ -70,7 +89,8 @@ pub fn compare<R: Read, S: Read>(
         for index in 0..width {
             let old_value = old_number.and_then(|_| old.get(index));
             let new_value = new_number.and_then(|_| new.get(index));
-            if old_value == new_value {
+            let differs = old_value != new_value;
+            if !differs && !include_unchanged {
                 continue;
             }
             let difference = CellDifference {
@@ -79,14 +99,16 @@ pub fn compare<R: Read, S: Read>(
                 before: old_value,
                 after: new_value,
             };
-            match difference.kind() {
-                ChangeKind::Modified => summary.modified += 1,
-                ChangeKind::Added => summary.added += 1,
-                ChangeKind::Removed => summary.removed += 1,
+            if differs {
+                match difference.kind() {
+                    ChangeKind::Modified => summary.modified += 1,
+                    ChangeKind::Added => summary.added += 1,
+                    ChangeKind::Removed => summary.removed += 1,
+                }
+                summary.changed_cells += 1;
+                changed = true;
             }
             emit(difference)?;
-            summary.changed_cells += 1;
-            changed = true;
         }
         summary.changed_records += u64::from(changed);
     }
@@ -157,5 +179,22 @@ mod tests {
             |_| Err(std::io::Error::other("output failed").into()),
         );
         assert!(result.unwrap_err().to_string().contains("output failed"));
+    }
+
+    #[test]
+    fn all_cells_keep_coordinates_across_equal_and_missing_cells() {
+        let mut coordinates = Vec::new();
+        let summary = compare_all(
+            &mut CsvInput::new(b"id,name\n001,same\n002,\n".as_slice(), "before"),
+            &mut CsvInput::new(b"id,name\n001,same\n002\n".as_slice(), "after"),
+            |cell| {
+                coordinates.push((cell.record, cell.column, cell.before.map(str::to_owned), cell.after.map(str::to_owned)));
+                Ok(())
+            },
+        ).unwrap();
+        assert_eq!(coordinates.len(), 6);
+        assert_eq!(coordinates[0], (1, 1, Some("id".into()), Some("id".into())));
+        assert_eq!(coordinates[5], (3, 2, Some("".into()), None));
+        assert_eq!(summary.changed_cells, 1);
     }
 }
