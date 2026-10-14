@@ -22,11 +22,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Build
-        run: cargo build --release
+        run: cargo build --release --locked
       - name: Test
-        run: cargo test
-
-      - name: Capture dependency lockfile
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: cat Cargo.lock
+        run: cargo test --locked
