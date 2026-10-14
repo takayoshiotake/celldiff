@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Reproducible Linux benchmark; requires /usr/bin/time and a release binary."""
+import argparse
+import csv
+import json
+import os
+from pathlib import Path
+import platform
+import subprocess
+import tempfile
+import time
+
+def bytes_in(paths):
+    total = 0
+    for path in paths:
+        for file in path.rglob("*"):
+            try:
+                if file.is_file():
+                    total += file.stat().st_size
+            except FileNotFoundError:
+                pass
+    return total
+
+def measure(binary, rows, case):
+    with tempfile.TemporaryDirectory(prefix="celldiff-bench-") as work:
+        root = Path(work)
+        tmp = root / "tmp"
+        out = root / "output"
+        tmp.mkdir()
+        out.mkdir()
+        old, new = root / "before.csv", root / "after.csv"
+        expected = 0
+        with old.open("w", newline="", encoding="utf-8") as a, new.open("w", newline="", encoding="utf-8") as b:
+            wa, wb = csv.writer(a), csv.writer(b)
+            for i in range(rows):
+                value = "東京都" + ("a" * 5000 if case == "long" else "本社")
+                changed = case == "dense" or (case in ("sparse", "long") and i % 100 == 0)
+                wa.writerow([f"{i:08}", value, "=1+1", ""])
+                wb.writerow([f"{i:08}", value.replace("東京都", "大阪府") if changed else value, "=1+1", ""])
+                expected += int(changed)
+        env = os.environ.copy()
+        env["TMPDIR"] = str(tmp)
+        stats = root / "time.txt"
+        target = out / "report.xlsx"
+        command = ["/usr/bin/time", "-f", "%e %M", "-o", str(stats), str(binary), str(old), str(new), "-o", str(target)]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        peak_disk = 0
+        while process.poll() is None:
+            peak_disk = max(peak_disk, bytes_in([tmp, out]))
+            time.sleep(0.02)
+        stdout, stderr = process.communicate()
+        if process.returncode != int(expected > 0):
+            raise RuntimeError(stderr.decode(errors="replace"))
+        if f"changed_cells={expected} " not in stdout.decode():
+            raise RuntimeError("Unexpected difference count")
+        seconds, rss = stats.read_text().split()
+        return {
+            "rows": rows, "case": case, "changed_cells": expected,
+            "input_bytes": old.stat().st_size + new.stat().st_size,
+            "elapsed_seconds": float(seconds), "peak_rss_kib": int(rss),
+            "sampled_peak_temp_and_output_bytes": peak_disk,
+            "xlsx_bytes": target.stat().st_size,
+        }
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, default=Path("target/release/celldiff"))
+    parser.add_argument("--output", type=Path, default=Path("benchmark-results.json"))
+    parser.add_argument("--rows", type=int, nargs="+", default=[10000, 100000])
+    args = parser.parse_args()
+    if any(n <= 0 for n in args.rows):
+        parser.error("row counts must be positive")
+    binary = args.binary.resolve()
+    results = [measure(binary, rows, case) for rows in args.rows for case in ["equal", "sparse", "dense"]]
+    results.append(measure(binary, min(max(args.rows), 10000), "long"))
+    document = {"platform": platform.platform(), "binary_bytes": binary.stat().st_size,
+                "temp_disk_sampling_seconds": 0.02, "results": results}
+    args.output.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
+    print(json.dumps(document, ensure_ascii=False, indent=2))
+
+if __name__ == "__main__":
+    main()

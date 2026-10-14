@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -10,18 +12,84 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build and test (${{ matrix.os }})
+    name: Build and test (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            flags: ''
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            flags: '-C target-feature=+crt-static'
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            flags: ''
+    env:
+      RUSTFLAGS: ${{ matrix.flags }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Install musl linker
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: rustfmt, clippy
+      - name: Format during bootstrap
+        run: cargo fmt
       - name: Build
-        run: cargo build --release --locked
+        run: cargo build --release --target ${{ matrix.target }}
       - name: Test
-        run: cargo test --locked
+        run: cargo test --target ${{ matrix.target }}
+      - name: Capture bootstrap sources
+        if: always() && runner.os == 'Linux'
+        run: python scripts/ci_capture.py
+      - name: Smoke test and package
+        run: |
+          binary="target/${{ matrix.target }}/release/celldiff"
+          if [ "${{ runner.os }}" = Windows ]; then binary="$binary.exe"; fi
+          python scripts/smoke.py --binary "$binary"
+          python scripts/package.py --binary "$binary" --target "${{ matrix.target }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: celldiff-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: example-xlsx
+          path: dist/sample.xlsx
+          retention-days: 14
+
+  performance:
+    # Bootstrap run; final workflow limits this to manual runs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: python scripts/benchmark.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
+          retention-days: 14
