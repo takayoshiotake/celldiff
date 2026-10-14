@@ -26,7 +26,9 @@ pub fn validate_text(value: &str) -> Result<(), AppError> {
 
 pub fn validate_position(record: u64, column: usize) -> Result<(), AppError> {
     if record == 0 || record > MAX_RECORDS || column == 0 || column > MAX_COLUMNS {
-        return Err(fail(format!("Record {record}, column {column} exceeds Excel's 1048576-row / 16384-column bounds")));
+        return Err(fail(format!(
+            "Record {record}, column {column} exceeds Excel's 1048576-row / 16384-column bounds"
+        )));
     }
     Ok(())
 }
@@ -89,22 +91,35 @@ impl Report {
                 .set_font_color(Color::RGB(0x1D4ED8))
                 .set_bold(),
             cell: Format::new().set_text_wrap(),
-            modified_cell: Format::new().set_text_wrap().set_background_color(Color::RGB(0xFEF9C3)),
-            added_cell: Format::new().set_text_wrap().set_background_color(Color::RGB(0xDBEAFE)),
-            removed_cell: Format::new().set_text_wrap().set_background_color(Color::RGB(0xFEE2E2)),
+            modified_cell: Format::new()
+                .set_text_wrap()
+                .set_background_color(Color::RGB(0xFEF9C3)),
+            added_cell: Format::new()
+                .set_text_wrap()
+                .set_background_color(Color::RGB(0xDBEAFE)),
+            removed_cell: Format::new()
+                .set_text_wrap()
+                .set_background_color(Color::RGB(0xFEE2E2)),
         })
     }
 
     pub fn write(&mut self, cell: CellDifference<'_>) -> Result<(), AppError> {
         validate_position(cell.record, cell.column)?;
         if cell.column > self.columns {
-            self.workbook.worksheet_from_index(0)?.set_column_range_width(self.columns as u16, (cell.column - 1) as u16, 24)?;
+            self.workbook
+                .worksheet_from_index(0)?
+                .set_column_range_width(self.columns as u16, (cell.column - 1) as u16, 24)?;
             self.columns = cell.column;
         }
         let differs = cell.before != cell.after;
         let row = (cell.record - 1) as u32;
         let column = (cell.column - 1) as u16;
-        let error_at = |error| fail(format!("Record {}, column {}: {error}", cell.record, cell.column));
+        let error_at = |error| {
+            fail(format!(
+                "Record {}, column {}: {error}",
+                cell.record, cell.column
+            ))
+        };
         for value in [cell.before, cell.after].into_iter().flatten() {
             validate_text(value).map_err(error_at)?;
         }
@@ -129,14 +144,17 @@ impl Report {
             crate::compare::ChangeKind::Added => &self.added_cell,
             crate::compare::ChangeKind::Removed => &self.removed_cell,
         };
-        let fragments: Vec<_> = parts.iter().map(|part| {
-            let font = match part.tag {
-                ChangeTag::Equal => &self.normal,
-                ChangeTag::Delete => &self.removed,
-                ChangeTag::Insert => &self.added,
-            };
-            (font, part.value.as_str())
-        }).collect();
+        let fragments: Vec<_> = parts
+            .iter()
+            .map(|part| {
+                let font = match part.tag {
+                    ChangeTag::Equal => &self.normal,
+                    ChangeTag::Delete => &self.removed,
+                    ChangeTag::Insert => &self.added,
+                };
+                (font, part.value.as_str())
+            })
+            .collect();
         let sheet = self.workbook.worksheet_from_index(0)?;
         if fragments.len() >= 2 {
             sheet.write_rich_string_with_format(row, column, &fragments, format)?;
@@ -183,15 +201,27 @@ impl Report {
                 "Comparison",
                 "Positional; first record included; UTF-8; no normalization".into(),
             ),
-            ("Removed text", "Red with strikethrough within each original cell".into()),
-            ("Added text", "Blue and bold within each original cell".into()),
+            (
+                "Removed text",
+                "Red with strikethrough within each original cell".into(),
+            ),
+            (
+                "Added text",
+                "Blue and bold within each original cell".into(),
+            ),
             (
                 "Empty vs missing",
                 "Blue fill: added cell; red fill: removed cell; yellow: modified".into(),
             ),
             ("Character unit", "Unicode grapheme cluster".into()),
-            ("Layout", "CSV coordinates preserved; unchanged cells included; no extra header".into()),
-            ("Cell text", "Removed and inserted segments are combined; this is a visual diff".into()),
+            (
+                "Layout",
+                "CSV coordinates preserved; unchanged cells included; no extra header".into(),
+            ),
+            (
+                "Cell text",
+                "Removed and inserted segments are combined; this is a visual diff".into(),
+            ),
         ];
         for (row, (label, value)) in entries.iter().enumerate() {
             sheet.write_string(row as u32, 0, *label)?;

@@ -1,0 +1,86 @@
+{
+  "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "commit": "01d6e05e60836fb77dabb95da1cadc2f75cd1873",
+  "binary_bytes": 2288792,
+  "temp_disk_sampling_seconds": 0.02,
+  "results": [
+    {
+      "rows": 10000,
+      "case": "equal",
+      "changed_cells": 0,
+      "input_bytes": 640000,
+      "elapsed_seconds": 0.082523,
+      "time_elapsed_seconds": 0.05,
+      "peak_rss_kib": 5260,
+      "sampled_peak_temp_and_output_bytes": 2257961,
+      "xlsx_bytes": 168418
+    },
+    {
+      "rows": 10000,
+      "case": "sparse",
+      "changed_cells": 100,
+      "input_bytes": 640000,
+      "elapsed_seconds": 0.061699,
+      "time_elapsed_seconds": 0.05,
+      "peak_rss_kib": 5252,
+      "sampled_peak_temp_and_output_bytes": 2359093,
+      "xlsx_bytes": 170598
+    },
+    {
+      "rows": 10000,
+      "case": "dense",
+      "changed_cells": 10000,
+      "input_bytes": 640000,
+      "elapsed_seconds": 0.102266,
+      "time_elapsed_seconds": 0.09,
+      "peak_rss_kib": 5292,
+      "sampled_peak_temp_and_output_bytes": 6075072,
+      "xlsx_bytes": 202950
+    },
+    {
+      "rows": 100000,
+      "case": "equal",
+      "changed_cells": 0,
+      "input_bytes": 6400000,
+      "elapsed_seconds": 0.509327,
+      "time_elapsed_seconds": 0.49,
+      "peak_rss_kib": 5160,
+      "sampled_peak_temp_and_output_bytes": 24667369,
+      "xlsx_bytes": 1622894
+    },
+    {
+      "rows": 100000,
+      "case": "sparse",
+      "changed_cells": 1000,
+      "input_bytes": 6400000,
+      "elapsed_seconds": 0.487241,
+      "time_elapsed_seconds": 0.48,
+      "peak_rss_kib": 5268,
+      "sampled_peak_temp_and_output_bytes": 25012127,
+      "xlsx_bytes": 1642838
+    },
+    {
+      "rows": 100000,
+      "case": "dense",
+      "changed_cells": 100000,
+      "input_bytes": 6400000,
+      "elapsed_seconds": 0.933623,
+      "time_elapsed_seconds": 0.92,
+      "peak_rss_kib": 5428,
+      "sampled_peak_temp_and_output_bytes": 62616013,
+      "xlsx_bytes": 1971538
+    },
+    {
+      "rows": 10000,
+      "case": "long",
+      "changed_cells": 100,
+      "input_bytes": 100520000,
+      "elapsed_seconds": 0.426691,
+      "time_elapsed_seconds": 0.41,
+      "peak_rss_kib": 5072,
+      "sampled_peak_temp_and_output_bytes": 52500489,
+      "xlsx_bytes": 298644
+    }
+  ]
+}

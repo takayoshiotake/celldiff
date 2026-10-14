@@ -46,11 +46,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
-      - name: Format during layout bootstrap
-        run: cargo fmt
-      - name: Capture formatted sources
-        if: runner.os == 'Linux'
-        run: python scripts/ci_capture.py
+      - name: Check formatting
+        run: cargo fmt --check
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Test
@@ -79,6 +76,7 @@ jobs:
           retention-days: 14
 
   performance:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

@@ -68,7 +68,12 @@ fn original_coordinates_and_partial_formats_are_preserved() {
         "id,name,note\n001,大阪本社,\"a\nc\"\n002,same,=2+2\n".as_bytes(),
     );
     let result = execute(&before, &after, &output, false);
-    assert_eq!(result.status.code(), Some(1), "{}", String::from_utf8_lossy(&result.stderr));
+    assert_eq!(
+        result.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     assert!(String::from_utf8_lossy(&result.stdout).contains("changed_cells=3"));
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
     assert_eq!(cell_text(&sheet, "A1"), "id");
@@ -82,33 +87,74 @@ fn original_coordinates_and_partial_formats_are_preserved() {
     assert!(sheet.contains("FFB91C1C") && sheet.contains("FF1D4ED8"));
     let doc = roxmltree::Document::parse(&sheet).unwrap();
     assert!(!doc.descendants().any(|n| n.has_tag_name("f")));
-    assert_eq!(doc.descendants().filter(|n| n.has_tag_name("row")).count(), 3);
-    assert_eq!(doc.descendants().find(|n| n.has_tag_name("dimension")).unwrap().attribute("ref"), Some("A1:C3"));
+    assert_eq!(
+        doc.descendants().filter(|n| n.has_tag_name("row")).count(),
+        3
+    );
+    assert_eq!(
+        doc.descendants()
+            .find(|n| n.has_tag_name("dimension"))
+            .unwrap()
+            .attribute("ref"),
+        Some("A1:C3")
+    );
 }
 
 #[test]
 fn empty_added_and_removed_cells_have_distinct_fills_without_extra_columns() {
     let (_dir, before, after, output) = fixture(b"a,\n", b"a\nnew,\n");
-    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(1));
+    assert_eq!(
+        execute(&before, &after, &output, false).status.code(),
+        Some(1)
+    );
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
     let styles = xml(&output, "xl/styles.xml");
     let document = roxmltree::Document::parse(&sheet).unwrap();
     let style_document = roxmltree::Document::parse(&styles).unwrap();
     let fill_color = |address| {
-        let cell = document.descendants().find(|n| n.has_tag_name("c") && n.attribute("r") == Some(address)).unwrap();
+        let cell = document
+            .descendants()
+            .find(|n| n.has_tag_name("c") && n.attribute("r") == Some(address))
+            .unwrap();
         let index: usize = cell.attribute("s").unwrap().parse().unwrap();
-        let xfs = style_document.descendants().find(|n| n.has_tag_name("cellXfs")).unwrap();
-        let xf = xfs.children().filter(|n| n.is_element()).nth(index).unwrap();
+        let xfs = style_document
+            .descendants()
+            .find(|n| n.has_tag_name("cellXfs"))
+            .unwrap();
+        let xf = xfs
+            .children()
+            .filter(|n| n.is_element())
+            .nth(index)
+            .unwrap();
         let fill_id: usize = xf.attribute("fillId").unwrap().parse().unwrap();
-        let fills = style_document.descendants().find(|n| n.has_tag_name("fills")).unwrap();
-        fills.children().filter(|n| n.is_element()).nth(fill_id).unwrap()
-            .descendants().find(|n| n.has_tag_name("fgColor")).unwrap().attribute("rgb").unwrap().to_string()
+        let fills = style_document
+            .descendants()
+            .find(|n| n.has_tag_name("fills"))
+            .unwrap();
+        fills
+            .children()
+            .filter(|n| n.is_element())
+            .nth(fill_id)
+            .unwrap()
+            .descendants()
+            .find(|n| n.has_tag_name("fgColor"))
+            .unwrap()
+            .attribute("rgb")
+            .unwrap()
+            .to_string()
     };
     assert_eq!(cell_text(&sheet, "A1"), "a");
     assert_eq!(cell_text(&sheet, "A2"), "new");
     assert_eq!(fill_color("B1"), "FFFEE2E2");
     assert_eq!(fill_color("B2"), "FFDBEAFE");
-    assert_eq!(document.descendants().find(|n| n.has_tag_name("dimension")).unwrap().attribute("ref"), Some("A1:B2"));
+    assert_eq!(
+        document
+            .descendants()
+            .find(|n| n.has_tag_name("dimension"))
+            .unwrap()
+            .attribute("ref"),
+        Some("A1:B2")
+    );
 }
 
 #[test]
@@ -119,7 +165,10 @@ fn identical_and_empty_inputs_preserve_the_full_grid() {
         assert_eq!(result.status.code(), Some(0));
         let sheet = xml(&output, "xl/worksheets/sheet1.xml");
         let doc = roxmltree::Document::parse(&sheet).unwrap();
-        assert_eq!(doc.descendants().filter(|n| n.has_tag_name("row")).count(), usize::from(!input.is_empty()));
+        assert_eq!(
+            doc.descendants().filter(|n| n.has_tag_name("row")).count(),
+            usize::from(!input.is_empty())
+        );
         if !input.is_empty() {
             assert_eq!(cell_text(&sheet, "A1"), "a");
             assert_eq!(cell_text(&sheet, "B1"), "b");
@@ -131,7 +180,10 @@ fn identical_and_empty_inputs_preserve_the_full_grid() {
 #[test]
 fn strings_keep_leading_zeros_and_formula_like_values() {
     let (_dir, before, after, output) = fixture(b"001,=1\n", b"001,+2\n");
-    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(1));
+    assert_eq!(
+        execute(&before, &after, &output, false).status.code(),
+        Some(1)
+    );
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
     assert_eq!(cell_text(&sheet, "A1"), "001");
     assert_eq!(cell_text(&sheet, "B1"), "=1+2");
@@ -142,7 +194,10 @@ fn strings_keep_leading_zeros_and_formula_like_values() {
 #[test]
 fn unchanged_rows_are_not_collapsed_when_only_a_later_cell_changes() {
     let (_dir, before, after, output) = fixture(b"a,b\nc,d\ne,f\n", b"a,b\nc,d\ne,g\n");
-    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(1));
+    assert_eq!(
+        execute(&before, &after, &output, false).status.code(),
+        Some(1)
+    );
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
     assert_eq!(cell_text(&sheet, "B1"), "b");
     assert_eq!(cell_text(&sheet, "B2"), "d");
@@ -154,7 +209,10 @@ fn combined_replacement_limit_does_not_truncate_or_publish() {
     let old = format!("{}\n", "a".repeat(20000));
     let new = format!("{}\n", "b".repeat(20000));
     let (_dir, before, after, output) = fixture(old.as_bytes(), new.as_bytes());
-    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(2));
+    assert_eq!(
+        execute(&before, &after, &output, false).status.code(),
+        Some(2)
+    );
     assert!(!output.exists());
 }
 
@@ -162,7 +220,10 @@ fn combined_replacement_limit_does_not_truncate_or_publish() {
 fn too_many_input_columns_are_rejected_even_when_identical() {
     let input = vec!["a"; 16385].join(",");
     let (_dir, before, after, output) = fixture(input.as_bytes(), input.as_bytes());
-    assert_eq!(execute(&before, &after, &output, false).status.code(), Some(2));
+    assert_eq!(
+        execute(&before, &after, &output, false).status.code(),
+        Some(2)
+    );
     assert!(!output.exists());
 }
 

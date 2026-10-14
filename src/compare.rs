@@ -188,10 +188,16 @@ mod tests {
             &mut CsvInput::new(b"id,name\n001,same\n002,\n".as_slice(), "before"),
             &mut CsvInput::new(b"id,name\n001,same\n002\n".as_slice(), "after"),
             |cell| {
-                coordinates.push((cell.record, cell.column, cell.before.map(str::to_owned), cell.after.map(str::to_owned)));
+                coordinates.push((
+                    cell.record,
+                    cell.column,
+                    cell.before.map(str::to_owned),
+                    cell.after.map(str::to_owned),
+                ));
                 Ok(())
             },
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(coordinates.len(), 6);
         assert_eq!(coordinates[0], (1, 1, Some("id".into()), Some("id".into())));
         assert_eq!(coordinates[5], (3, 2, Some("".into()), None));
