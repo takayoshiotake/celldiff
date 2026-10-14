@@ -4,22 +4,47 @@ import argparse
 import csv
 import json
 import os
+import stat
 from pathlib import Path
 import platform
 import subprocess
 import tempfile
 import time
 
-def bytes_in(paths):
-    total = 0
+def bytes_in(paths, process_id):
+    # Worksheet tempfiles may be unlinked while still open. Include /proc fds,
+    # deduplicating by inode, so a directory listing does not undercount them.
+    sizes = {}
     for path in paths:
         for file in path.rglob("*"):
             try:
-                if file.is_file():
-                    total += file.stat().st_size
+                info = file.stat()
+                if stat.S_ISREG(info.st_mode):
+                    sizes[(info.st_dev, info.st_ino)] = info.st_size
             except FileNotFoundError:
                 pass
-    return total
+    pending, visited = [process_id], set()
+    while pending:
+        pid = pending.pop()
+        if pid in visited:
+            continue
+        visited.add(pid)
+        try:
+            children = Path(f"/proc/{pid}/task/{pid}/children").read_text()
+            pending.extend(int(child) for child in children.split())
+            for fd in Path(f"/proc/{pid}/fd").iterdir():
+                try:
+                    target = os.readlink(fd)
+                    if not any(target.startswith(str(path) + "/") for path in paths):
+                        continue
+                    info = fd.stat()
+                    if stat.S_ISREG(info.st_mode):
+                        sizes[(info.st_dev, info.st_ino)] = info.st_size
+                except (FileNotFoundError, PermissionError):
+                    pass
+        except (FileNotFoundError, PermissionError):
+            pass
+    return sum(sizes.values())
 
 def measure(binary, rows, case):
     with tempfile.TemporaryDirectory(prefix="celldiff-bench-") as work:
@@ -43,12 +68,15 @@ def measure(binary, rows, case):
         stats = root / "time.txt"
         target = out / "report.xlsx"
         command = ["/usr/bin/time", "-f", "%e %M", "-o", str(stats), str(binary), str(old), str(new), "-o", str(target)]
+        started = time.perf_counter()
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         peak_disk = 0
         while process.poll() is None:
-            peak_disk = max(peak_disk, bytes_in([tmp, out]))
+            peak_disk = max(peak_disk, bytes_in([tmp, out], process.pid))
             time.sleep(0.02)
         stdout, stderr = process.communicate()
+        elapsed = time.perf_counter() - started
+        peak_disk = max(peak_disk, bytes_in([tmp, out], process.pid))
         if process.returncode != int(expected > 0):
             raise RuntimeError(stderr.decode(errors="replace"))
         if f"changed_cells={expected} " not in stdout.decode():
@@ -57,7 +85,8 @@ def measure(binary, rows, case):
         return {
             "rows": rows, "case": case, "changed_cells": expected,
             "input_bytes": old.stat().st_size + new.stat().st_size,
-            "elapsed_seconds": float(seconds), "peak_rss_kib": int(rss),
+            "elapsed_seconds": round(elapsed, 6), "time_elapsed_seconds": float(seconds),
+            "peak_rss_kib": int(rss),
             "sampled_peak_temp_and_output_bytes": peak_disk,
             "xlsx_bytes": target.stat().st_size,
         }

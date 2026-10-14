@@ -27,11 +27,11 @@ pub fn segments(before: &str, after: &str) -> Vec<Segment> {
         if change.value().is_empty() {
             continue;
         }
-        if let Some(last) = result.last_mut() {
-            if last.tag == change.tag() {
-                last.value.push_str(change.value());
-                continue;
-            }
+        if let Some(last) = result.last_mut()
+            && last.tag == change.tag()
+        {
+            last.value.push_str(change.value());
+            continue;
         }
         result.push(Segment {
             tag: change.tag(),
