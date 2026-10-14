@@ -59,10 +59,7 @@ impl<R: Read> CsvInput<R> {
 
     /// Returns the 1-based record number, or None at EOF.
     /// The buffer is overwritten; borrowed cells must not outlive the next read.
-    pub fn read_record(
-        &mut self,
-        buffer: &mut StringRecord,
-    ) -> Result<Option<u64>, InputError> {
+    pub fn read_record(&mut self, buffer: &mut StringRecord) -> Result<Option<u64>, InputError> {
         match self.reader.read_record(buffer) {
             Ok(true) => {
                 self.records_read += 1;
@@ -129,7 +126,10 @@ mod tests {
 
     #[test]
     fn accepts_utf8_bom() {
-        assert_eq!(records(b"\xef\xbb\xbf001,name\n"), vec![vec!["001", "name"]]);
+        assert_eq!(
+            records(b"\xef\xbb\xbf001,name\n"),
+            vec![vec!["001", "name"]]
+        );
     }
 
     #[test]

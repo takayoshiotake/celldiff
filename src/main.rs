@@ -1,7 +1,12 @@
+use celldiff::{
+    AppError,
+    compare::compare,
+    input::CsvInput,
+    output::{Report, validate_paths},
+};
+use clap::Parser;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use clap::Parser;
-use celldiff::{AppError, compare::compare, input::CsvInput, output::{Report, validate_paths}};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -27,8 +32,12 @@ fn run(args: Args) -> Result<bool, AppError> {
     report.save(&args.output, args.force, summary, &args.before, &args.after)?;
     println!(
         "changed_cells={} changed_records={} modified={} added={} removed={} output={}",
-        summary.changed_cells, summary.changed_records, summary.modified,
-        summary.added, summary.removed, args.output.display()
+        summary.changed_cells,
+        summary.changed_records,
+        summary.modified,
+        summary.added,
+        summary.removed,
+        args.output.display()
     );
     Ok(summary.changed_cells != 0)
 }

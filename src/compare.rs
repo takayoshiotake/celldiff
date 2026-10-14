@@ -1,7 +1,7 @@
 //! Positional CSV comparison with borrowed cell values and a streaming sink.
-use std::io::Read;
-use csv::StringRecord;
 use crate::{AppError, input::CsvInput};
+use csv::StringRecord;
+use std::io::Read;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeKind {
@@ -103,10 +103,16 @@ mod tests {
             &mut CsvInput::new(old.as_bytes(), "before"),
             &mut CsvInput::new(new.as_bytes(), "after"),
             |d| {
-                values.push((d.record, d.column, d.before.map(str::to_owned), d.after.map(str::to_owned)));
+                values.push((
+                    d.record,
+                    d.column,
+                    d.before.map(str::to_owned),
+                    d.after.map(str::to_owned),
+                ));
                 Ok(())
             },
-        ).unwrap();
+        )
+        .unwrap();
         (summary, values)
     }
     #[test]

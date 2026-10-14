@@ -53,7 +53,7 @@ def measure(binary, rows, case):
             raise RuntimeError(stderr.decode(errors="replace"))
         if f"changed_cells={expected} " not in stdout.decode():
             raise RuntimeError("Unexpected difference count")
-        seconds, rss = stats.read_text().split()
+        seconds, rss = stats.read_text().splitlines()[-1].split()
         return {
             "rows": rows, "case": case, "changed_cells": expected,
             "input_bytes": old.stat().st_size + new.stat().st_size,
@@ -73,7 +73,10 @@ def main():
     binary = args.binary.resolve()
     results = [measure(binary, rows, case) for rows in args.rows for case in ["equal", "sparse", "dense"]]
     results.append(measure(binary, min(max(args.rows), 10000), "long"))
-    document = {"platform": platform.platform(), "binary_bytes": binary.stat().st_size,
+    document = {"platform": platform.platform(),
+                "rustc": subprocess.check_output(["rustc", "--version"], text=True).strip(),
+                "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                "binary_bytes": binary.stat().st_size,
                 "temp_disk_sampling_seconds": 0.02, "results": results}
     args.output.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(document, ensure_ascii=False, indent=2))
