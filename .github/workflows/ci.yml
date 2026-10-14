@@ -25,3 +25,8 @@ jobs:
         run: cargo build --release
       - name: Test
         run: cargo test
+
+      - name: Capture dependency lockfile
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: cat Cargo.lock
