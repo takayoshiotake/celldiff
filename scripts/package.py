@@ -2,7 +2,6 @@
 """Package a built binary and inspect its dynamic dependencies on the host."""
 import argparse
 import hashlib
-import json
 import platform
 from pathlib import Path
 import shutil
@@ -17,11 +16,11 @@ def main():
     args = parser.parse_args()
     args.binary.resolve(strict=True)
     folder = Path("dist") / f"celldiff-{args.target}"
-    folder.mkdir(parents=True, exist_ok=True)
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
     binary = folder / args.binary.name
     shutil.copy2(args.binary, binary)
-    for path in ["README.md", "docs/design.md", "docs/validation.md"]:
-        shutil.copy2(path, folder / Path(path).name)
     system = platform.system()
     if system == "Windows":
         program = shutil.which("dumpbin")
@@ -41,13 +40,15 @@ def main():
     if command:
         result = subprocess.run(command, text=True, capture_output=True)
         dependency_output = result.stdout + result.stderr
-    info = {
-        "target": args.target, "host": platform.platform(),
-        "binary_bytes": binary.stat().st_size,
-        "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-        "dynamic_dependencies": dependency_output,
-    }
-    (folder / "build-info.json").write_text(json.dumps(info, indent=2) + "\n")
+    info = (
+        f"Target: {args.target}\n"
+        f"Host: {platform.platform()}\n"
+        f"Binary size (bytes): {binary.stat().st_size}\n"
+        f"SHA-256: {hashlib.sha256(binary.read_bytes()).hexdigest()}\n"
+        "\nDynamic dependencies:\n"
+        f"{dependency_output.rstrip()}\n"
+    )
+    (folder / "celldiff-build-info.txt").write_text(info, encoding="utf-8")
     if system == "Windows":
         archive = Path("dist") / f"{folder.name}.zip"
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as package:
@@ -57,7 +58,7 @@ def main():
         archive = Path("dist") / f"{folder.name}.tar.gz"
         with tarfile.open(archive, "w:gz") as package:
             package.add(folder, arcname=folder.name)
-    print(json.dumps(info, indent=2))
+    print(info, end="")
 
 if __name__ == "__main__":
     main()
