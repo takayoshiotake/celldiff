@@ -53,9 +53,24 @@ CSVパーサーは空の物理行をスキップします。引用符内の改�
 
 ## ダウンロードと実行要件
 
-[GitHub Actions](https://github.com/takayoshiotake/celldiff/actions)の成功したCI実行から、
-対象の`celldiff-*`成果物をダウンロードして展開してください。
-タグ`v*`、mainへのpush、手動実行で配布物を生成します。GitHub Releaseの自動公開は行いません。
+[Releases](https://github.com/takayoshiotake/celldiff/releases)から対象OSのアーカイブと
+`checksums.txt`をダウンロードして展開してください。
+`checksums.txt`はアーカイブのSHA-256一覧です。
+公開前の成果物は[GitHub Actions](https://github.com/takayoshiotake/celldiff/actions)の成功したCI実行でも取得できます。
+CI成果物の保存期間は14日です。
+
+### リリース作成（メンテナー向け）
+
+1. mainのCI成功を確認し、実行URL末尾の実行IDを控えます。
+2. `Cargo.toml`のバージョンに対応するタグ（例: `v0.1.0`）でDraft Releaseを作成します。対象はmainにします。
+3. Actionsの「Release assets (draft only)」で「Run workflow」を開き、ブランチmain、タグ、CI実行IDを指定して実行します。
+4. バイナリ3種と`checksums.txt`の添付を確認し、GitHub画面から公開します。
+
+リリース用Actionsは手動実行のみです。成功したmainのCI成果物だけを使い、
+Draftの対象をそのテスト済みコミットに固定します。既存タグがある場合は同じコミットを指す必要があります。
+同名・同ハッシュの添付はスキップし、異なる内容の上書きは拒否します。
+タグの作成やReleaseの公開は自動で行いません。
+成果物が期限切れの場合はmainのCIを再実行してください。
 
 | 配布対象 | 内容 |
 | --- | --- |
