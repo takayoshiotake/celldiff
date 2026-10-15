@@ -40,6 +40,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import base64
+          import gzip
           import hashlib
           import io
           import json
@@ -47,6 +48,7 @@ jobs:
           from pathlib import Path
           import re
           import subprocess
+          import tarfile
           import tomllib
           import zipfile
           
@@ -106,6 +108,68 @@ jobs:
               "x86_64-unknown-linux-musl": ("linux_amd64", "tar.gz"),
               "aarch64-apple-darwin": ("darwin_arm64", "tar.gz"),
           }
+          def release_archive(data, target, extension):
+              """Keep only the binary and text build information; do not extract paths."""
+              root = f"celldiff-{target}"
+              binary_name = "celldiff.exe" if extension == "zip" else "celldiff"
+              wanted = {f"{root}/{name}" for name in (binary_name, "build-info.json", "celldiff-build-info.txt")}
+              if extension == "zip":
+                  with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                      members = [m for m in archive.infolist() if m.filename in wanted]
+                      if len({m.filename for m in members}) != len(members):
+                          raise SystemExit("Duplicate archive members")
+                      contents = {m.filename: archive.read(m) for m in members}
+              else:
+                  with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+                      members = [m for m in archive.getmembers() if m.name in wanted]
+                      if len({m.name for m in members}) != len(members) or any(not m.isfile() for m in members):
+                          raise SystemExit("Invalid archive members")
+                      contents = {m.name: archive.extractfile(m).read() for m in members}
+              binary = contents[f"{root}/{binary_name}"]
+              digest = hashlib.sha256(binary).hexdigest()
+              text_key = f"{root}/celldiff-build-info.txt"
+              if text_key in contents:
+                  info = contents[text_key].decode("utf-8")
+                  if (
+                      f"Target: {target}" not in info.splitlines()
+                      or f"SHA-256: {digest}" not in info.splitlines()
+                      or f"Binary size (bytes): {len(binary)}" not in info.splitlines()
+                  ):
+                      raise SystemExit("Text build information does not match the binary")
+              else:
+                  # Support already-tested CI artifacts created before the text format.
+                  metadata = json.loads(contents[f"{root}/build-info.json"])
+                  if metadata["target"] != target or metadata["sha256"] != digest or metadata["binary_bytes"] != len(binary):
+                      raise SystemExit("JSON build information does not match the binary")
+                  info = (
+                      f"Target: {target}\n"
+                      f"Host: {metadata['host']}\n"
+                      f"Binary size (bytes): {len(binary)}\n"
+                      f"SHA-256: {digest}\n"
+                      "\nDynamic dependencies:\n"
+                      f"{metadata['dynamic_dependencies'].rstrip()}\n"
+                  )
+              files = [(binary_name, binary, 0o755), ("celldiff-build-info.txt", info.encode("utf-8"), 0o644)]
+              output = io.BytesIO()
+              # Fixed archive metadata makes retries produce the same checksums.
+              if extension == "zip":
+                  with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                      for name, content, mode in files:
+                          entry = zipfile.ZipInfo(f"{root}/{name}", date_time=(1980, 1, 1, 0, 0, 0))
+                          entry.create_system = 3
+                          entry.external_attr = (0o100000 | mode) << 16
+                          entry.compress_type = zipfile.ZIP_DEFLATED
+                          archive.writestr(entry, content)
+              else:
+                  with gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as compressed:
+                      with tarfile.open(fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+                          for name, content, mode in files:
+                              entry = tarfile.TarInfo(f"{root}/{name}")
+                              entry.size = len(content)
+                              entry.mode = mode
+                              archive.addfile(entry, io.BytesIO(content))
+              return output.getvalue()
+
           folder = Path("release-assets")
           folder.mkdir()
           for target, (platform, extension) in targets.items():
@@ -118,7 +182,8 @@ jobs:
                   if archive.namelist() != [source]:
                       raise SystemExit(f"Unexpected contents in artifact for {target}")
                   data = archive.read(source)
-              (folder / f"celldiff_{tag}_{platform}.{extension}").write_bytes(data)
+              cleaned = release_archive(data, target, extension)
+              (folder / f"celldiff_{tag}_{platform}.{extension}").write_bytes(cleaned)
           
           files = sorted(folder.iterdir())
           checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in files)
