@@ -56,6 +56,7 @@ CSVパーサーは空の物理行をスキップします。引用符内の改�
 [Releases](https://github.com/takayoshiotake/celldiff/releases)から対象OSのアーカイブと
 `checksums.txt`をダウンロードして展開してください。
 `checksums.txt`はアーカイブのSHA-256一覧です。
+アーカイブには実行ファイルと`celldiff-build-info.txt`だけを同梱します。
 公開前の成果物は[GitHub Actions](https://github.com/takayoshiotake/celldiff/actions)の成功したCI実行でも取得できます。
 CI成果物の保存期間は14日です。
 
@@ -80,7 +81,7 @@ Draftの対象をそのテスト済みコミットに固定します。既存タ
 
 利用時にRust、Python、Excelのインストールは不要です（xlsxを閲覧するには対応アプリが必要）。
 macOSではOS標準ライブラリを利用します。署名・公証は行っていません。
-対応対象の実測サイズと動的依存は、各配布物の`build-info.json`に記録します。
+対応対象の実測サイズと動的依存は、各配布物の`celldiff-build-info.txt`に記録します。
 アーカイブ自体はOSごとに異なります。全OSで動く単一の実行ファイルではありません。
 一時ファイルを作成できるディスク領域が必要です。
 
