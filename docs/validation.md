@@ -52,7 +52,8 @@ scripts/benchmark.pyで一致・疎な差分・全件差分・長いセルを再
 ## 配布物
 
 Windows x86_64（静的CRT）、Linux x86_64-musl、macOS ARM64向け。
-build-info.jsonにバイト数、SHA-256、ホスト、ターゲット、動的依存を記録する。
+アーカイブには実行ファイルとcelldiff-build-info.txtのみを含め、README・設計書・検証記録は同梱しない。
+celldiff-build-info.txtにバイト数、SHA-256、ホスト、ターゲット、動的依存を記録する。
 配布実行ファイルでもサンプルCSVを比較して座標と文字列を検証する。
 
 ## 目視確認
