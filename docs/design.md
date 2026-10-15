@@ -144,7 +144,7 @@ Excel、Git、Pythonは配布exeの実行要件ではない。
 releaseのstrip、thin LTO、codegen-units=1を使い、サイズを実測する。
 mainのpush、v*タグ、手動実行でActions成果物を生成する。
 自動でGitHub Releaseを公開せず、署名・公証も行わない。
-macOSではOS標準ライブラリへ依存する。実際の依存とサイズをbuild-info.jsonに記録する。
+macOSではOS標準ライブラリへ依存する。実際の依存とサイズをcelldiff-build-info.txtに記録する。
 
 ## 未実施・将来
 
