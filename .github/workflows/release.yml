@@ -1,0 +1,159 @@
+name: Release assets (draft only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag
+        required: true
+        type: string
+        default: v0.1.0
+      ci_run_id:
+        description: Successful CI run ID on main (artifacts retained for 14 days)
+        required: true
+        type: string
+        default: '38655226985'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-assets-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  attach:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      # Do not check out or execute code from the selected CI run.
+      - name: Validate CI and attach archives with SHA-256 to draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import io
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tomllib
+          import zipfile
+          
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tag = os.environ["RELEASE_TAG"]
+          run_id = os.environ["CI_RUN_ID"]
+          if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", tag):
+              raise SystemExit("Expected a version tag such as v0.1.0")
+          if not run_id.isdecimal():
+              raise SystemExit("CI run ID must contain digits only")
+          
+          def api(path, *args, raw=False):
+              result = subprocess.check_output(["gh", "api", path, *args])
+              return result if raw else json.loads(result)
+          
+          prefix = f"repos/{repo}"
+          run = api(f"{prefix}/actions/runs/{run_id}")
+          if not (
+              run["status"] == "completed" and run["conclusion"] == "success"
+              and run["path"] == ".github/workflows/ci.yml"
+              and run["event"] in ("push", "workflow_dispatch")
+              and run["head_branch"] == "main"
+              and run["head_repository"]["full_name"] == repo
+          ):
+              raise SystemExit("Only successful main-branch CI runs from this repository are accepted")
+          sha = run["head_sha"]
+          manifest = api(f"{prefix}/contents/Cargo.toml?ref={sha}")
+          version = tomllib.loads(base64.b64decode(manifest["content"]).decode())["package"]["version"]
+          if tag != f"v{version}":
+              raise SystemExit("Release tag does not match the tested Cargo.toml version")
+          
+          # List releases because the tag of an unpublished draft may not exist yet.
+          pages = api(f"{prefix}/releases?per_page=100", "--paginate", "--slurp")
+          matches = [r for page in pages for r in page if r["tag_name"] == tag]
+          if len(matches) != 1 or not matches[0]["draft"]:
+              raise SystemExit("Create exactly one draft release for this tag first")
+          release = matches[0]
+          release_id = release["id"]
+          if release["target_commitish"] not in ("main", sha):
+              raise SystemExit("Draft target must be main or the tested commit")
+          
+          # An existing lightweight or annotated tag must resolve to the tested commit.
+          refs = api(f"{prefix}/git/matching-refs/tags/{tag}")
+          exact = [r for r in refs if r["ref"] == f"refs/tags/{tag}"]
+          if exact:
+              obj = exact[0]["object"]
+              for _ in range(10):
+                  if obj["type"] != "tag":
+                      break
+                  obj = api(f"{prefix}/git/tags/{obj['sha']}")["object"]
+              if obj["type"] != "commit" or obj["sha"] != sha:
+                  raise SystemExit("Existing tag does not point to the tested commit")
+          
+          artifacts = api(f"{prefix}/actions/runs/{run_id}/artifacts?per_page=100")["artifacts"]
+          targets = {
+              "x86_64-pc-windows-msvc": ("windows_amd64", "zip"),
+              "x86_64-unknown-linux-musl": ("linux_amd64", "tar.gz"),
+              "aarch64-apple-darwin": ("darwin_arm64", "tar.gz"),
+          }
+          folder = Path("release-assets")
+          folder.mkdir()
+          for target, (platform, extension) in targets.items():
+              selected = [a for a in artifacts if a["name"] == f"celldiff-{target}" and not a["expired"]]
+              if len(selected) != 1:
+                  raise SystemExit(f"Missing or expired artifact for {target}; run CI again")
+              wrapper = api(f"{prefix}/actions/artifacts/{selected[0]['id']}/zip", raw=True)
+              with zipfile.ZipFile(io.BytesIO(wrapper)) as archive:
+                  source = f"celldiff-{target}.{extension}"
+                  if archive.namelist() != [source]:
+                      raise SystemExit(f"Unexpected contents in artifact for {target}")
+                  data = archive.read(source)
+              (folder / f"celldiff_{tag}_{platform}.{extension}").write_bytes(data)
+          
+          files = sorted(folder.iterdir())
+          checksums = "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in files)
+          (folder / "checksums.txt").write_text(checksums, encoding="utf-8")
+          files = sorted(folder.iterdir())
+          
+          # Validate all existing assets before changing the draft. Never overwrite files.
+          existing = api(f"{prefix}/releases/{release_id}/assets?per_page=100")
+          for path in files:
+              digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              same_name = [a for a in existing if a["name"] == path.name]
+              if same_name and (len(same_name) != 1 or same_name[0].get("digest") != digest):
+                  raise SystemExit(f"Conflicting existing asset: {path.name}")
+          
+          current = api(f"{prefix}/releases/{release_id}")
+          if not current["draft"] or current["tag_name"] != tag or current["target_commitish"] != release["target_commitish"]:
+              raise SystemExit("Draft changed while preparing assets; inspect it and retry")
+          # Pin the draft so publishing later cannot accidentally tag a newer main commit.
+          api(f"{prefix}/releases/{release_id}", "--method", "PATCH", "-f", f"target_commitish={sha}")
+          for path in files:
+              digest = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+              if any(a["name"] == path.name for a in existing):
+                  print(f"Already attached and verified: {path.name}")
+                  continue
+              uploaded = api(
+                  f"https://uploads.github.com/{prefix}/releases/{release_id}/assets?name={path.name}",
+                  "--method", "POST", "-H", "Content-Type: application/octet-stream",
+                  "--input", str(path),
+              )
+              if uploaded.get("digest") != digest:
+                  raise SystemExit(f"Uploaded SHA-256 mismatch: {path.name}")
+              print(f"Attached and verified: {path.name}")
+          
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(f"## Draft assets attached\n\nTag: {tag}\n\nTested commit: {sha}\n\n")
+              summary.write(f"Source CI: {run['html_url']}\n\nThe release remains a draft.\n\n")
+              summary.write("SHA-256:\n\n" + chr(96) * 3 + f"text\n{checksums}" + chr(96) * 3 + "\n")
+          PY
