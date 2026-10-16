@@ -23,12 +23,12 @@ impl ChangeKind {
 pub struct CellDifference<'a> {
     pub record: u64,
     pub column: usize,
-    pub before: Option<&'a str>,
-    pub after: Option<&'a str>,
+    pub left: Option<&'a str>,
+    pub right: Option<&'a str>,
 }
 impl CellDifference<'_> {
     pub fn kind(&self) -> ChangeKind {
-        match (self.before, self.after) {
+        match (self.left, self.right) {
             (None, Some(_)) => ChangeKind::Added,
             (Some(_), None) => ChangeKind::Removed,
             _ => ChangeKind::Modified,
@@ -38,8 +38,8 @@ impl CellDifference<'_> {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
-    pub before_records: u64,
-    pub after_records: u64,
+    pub left_records: u64,
+    pub right_records: u64,
     pub changed_records: u64,
     pub changed_cells: u64,
     pub modified: u64,
@@ -49,25 +49,25 @@ pub struct Summary {
 
 /// Visit changed cells only.
 pub fn compare<R: Read, S: Read>(
-    before: &mut CsvInput<R>,
-    after: &mut CsvInput<S>,
+    left: &mut CsvInput<R>,
+    right: &mut CsvInput<S>,
     emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
 ) -> Result<Summary, AppError> {
-    compare_impl(before, after, false, emit)
+    compare_impl(left, right, false, emit)
 }
 
 /// Visit every existing cell in row-major order, including unchanged values.
 pub fn compare_all<R: Read, S: Read>(
-    before: &mut CsvInput<R>,
-    after: &mut CsvInput<S>,
+    left: &mut CsvInput<R>,
+    right: &mut CsvInput<S>,
     emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
 ) -> Result<Summary, AppError> {
-    compare_impl(before, after, true, emit)
+    compare_impl(left, right, true, emit)
 }
 
 fn compare_impl<R: Read, S: Read>(
-    before: &mut CsvInput<R>,
-    after: &mut CsvInput<S>,
+    left: &mut CsvInput<R>,
+    right: &mut CsvInput<S>,
     include_unchanged: bool,
     mut emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
 ) -> Result<Summary, AppError> {
@@ -76,14 +76,14 @@ fn compare_impl<R: Read, S: Read>(
     let mut summary = Summary::default();
     let mut record = 0;
     loop {
-        let old_number = before.read_record(&mut old)?;
-        let new_number = after.read_record(&mut new)?;
+        let old_number = left.read_record(&mut old)?;
+        let new_number = right.read_record(&mut new)?;
         if old_number.is_none() && new_number.is_none() {
             break;
         }
         record += 1;
-        summary.before_records += u64::from(old_number.is_some());
-        summary.after_records += u64::from(new_number.is_some());
+        summary.left_records += u64::from(old_number.is_some());
+        summary.right_records += u64::from(new_number.is_some());
         let mut changed = false;
         let width = old.len().max(new.len());
         for index in 0..width {
@@ -96,8 +96,8 @@ fn compare_impl<R: Read, S: Read>(
             let difference = CellDifference {
                 record,
                 column: index + 1,
-                before: old_value,
-                after: new_value,
+                left: old_value,
+                right: new_value,
             };
             if differs {
                 match difference.kind() {
@@ -122,14 +122,14 @@ mod tests {
     fn run(old: &str, new: &str) -> (Summary, Vec<Values>) {
         let mut values = Vec::new();
         let summary = compare(
-            &mut CsvInput::new(old.as_bytes(), "before"),
-            &mut CsvInput::new(new.as_bytes(), "after"),
+            &mut CsvInput::new(old.as_bytes(), "left"),
+            &mut CsvInput::new(new.as_bytes(), "right"),
             |d| {
                 values.push((
                     d.record,
                     d.column,
-                    d.before.map(str::to_owned),
-                    d.after.map(str::to_owned),
+                    d.left.map(str::to_owned),
+                    d.right.map(str::to_owned),
                 ));
                 Ok(())
             },
@@ -153,8 +153,8 @@ mod tests {
     fn extra_columns_and_records_are_not_lost() {
         let (summary, values) = run("a,\nz\n", "a\n");
         assert_eq!(summary.removed, 2);
-        assert_eq!(summary.before_records, 2);
-        assert_eq!(summary.after_records, 1);
+        assert_eq!(summary.left_records, 2);
+        assert_eq!(summary.right_records, 1);
         assert_eq!(values[0], (1, 2, Some("".into()), None));
         assert_eq!(values[1], (2, 1, Some("z".into()), None));
         assert_eq!(run("a\n", "a,\nz\n").0.added, 2);
@@ -174,8 +174,8 @@ mod tests {
     #[test]
     fn sink_failure_stops_comparison() {
         let result = compare(
-            &mut CsvInput::new(b"a\nb\n".as_slice(), "before"),
-            &mut CsvInput::new(b"x\ny\n".as_slice(), "after"),
+            &mut CsvInput::new(b"a\nb\n".as_slice(), "left"),
+            &mut CsvInput::new(b"x\ny\n".as_slice(), "right"),
             |_| Err(std::io::Error::other("output failed").into()),
         );
         assert!(result.unwrap_err().to_string().contains("output failed"));
@@ -185,14 +185,14 @@ mod tests {
     fn all_cells_keep_coordinates_across_equal_and_missing_cells() {
         let mut coordinates = Vec::new();
         let summary = compare_all(
-            &mut CsvInput::new(b"id,name\n001,same\n002,\n".as_slice(), "before"),
-            &mut CsvInput::new(b"id,name\n001,same\n002\n".as_slice(), "after"),
+            &mut CsvInput::new(b"id,name\n001,same\n002,\n".as_slice(), "left"),
+            &mut CsvInput::new(b"id,name\n001,same\n002\n".as_slice(), "right"),
             |cell| {
                 coordinates.push((
                     cell.record,
                     cell.column,
-                    cell.before.map(str::to_owned),
-                    cell.after.map(str::to_owned),
+                    cell.left.map(str::to_owned),
+                    cell.right.map(str::to_owned),
                 ));
                 Ok(())
             },

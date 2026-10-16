@@ -91,7 +91,7 @@ mod tests {
     use super::*;
 
     fn records(data: &[u8]) -> Vec<Vec<String>> {
-        let mut input = CsvInput::new(data, "before.csv");
+        let mut input = CsvInput::new(data, "left.csv");
         let mut buffer = StringRecord::new();
         let mut result = Vec::new();
         while input.read_record(&mut buffer).unwrap().is_some() {
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn counts_logical_records_and_reuses_buffer_without_stale_fields() {
-        let mut input = CsvInput::new(b"\"a\nb\",c\nz\n".as_slice(), "after.csv");
+        let mut input = CsvInput::new(b"\"a\nb\",c\nz\n".as_slice(), "right.csv");
         let mut buffer = StringRecord::new();
         assert_eq!(input.read_record(&mut buffer).unwrap(), Some(1));
         assert_eq!(buffer.len(), 2);
@@ -155,13 +155,13 @@ mod tests {
 
     #[test]
     fn invalid_utf8_reports_input_and_position() {
-        let mut input = CsvInput::new(b"ok\n\xff\n".as_slice(), "after.csv");
+        let mut input = CsvInput::new(b"ok\n\xff\n".as_slice(), "right.csv");
         let mut buffer = StringRecord::new();
         input.read_record(&mut buffer).unwrap();
         let error = input.read_record(&mut buffer).unwrap_err();
-        assert_eq!(error.input(), "after.csv");
+        assert_eq!(error.input(), "right.csv");
         assert_eq!(error.position().unwrap().record(), 1);
-        assert!(error.to_string().contains("after.csv"));
+        assert!(error.to_string().contains("right.csv"));
         assert!(error.source().is_some());
     }
 
@@ -173,9 +173,9 @@ mod tests {
                 Err(std::io::Error::other("read failed"))
             }
         }
-        let mut input = CsvInput::new(Broken, "before.csv");
+        let mut input = CsvInput::new(Broken, "left.csv");
         let error = input.read_record(&mut StringRecord::new()).unwrap_err();
-        assert_eq!(error.input(), "before.csv");
+        assert_eq!(error.input(), "left.csv");
         assert!(error.to_string().contains("read failed"));
         assert!(error.source().is_some());
     }

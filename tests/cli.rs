@@ -9,10 +9,10 @@ fn cli(args: &[&std::ffi::OsStr]) -> Output {
         .output()
         .unwrap()
 }
-fn execute(before: &Path, after: &Path, output: &Path, force: bool) -> Output {
+fn execute(left: &Path, right: &Path, output: &Path, force: bool) -> Output {
     let mut args = vec![
-        before.as_os_str(),
-        after.as_os_str(),
+        left.as_os_str(),
+        right.as_os_str(),
         std::ffi::OsStr::new("-o"),
         output.as_os_str(),
     ];
@@ -53,21 +53,21 @@ fn fixture(
     std::path::PathBuf,
 ) {
     let dir = tempfile::tempdir().unwrap();
-    let before = dir.path().join("before file.csv");
-    let after = dir.path().join("after file.csv");
+    let left = dir.path().join("left file.csv");
+    let right = dir.path().join("right file.csv");
     let output = dir.path().join("report.xlsx");
-    fs::write(&before, old).unwrap();
-    fs::write(&after, new).unwrap();
-    (dir, before, after, output)
+    fs::write(&left, old).unwrap();
+    fs::write(&right, new).unwrap();
+    (dir, left, right, output)
 }
 
 #[test]
 fn original_coordinates_and_partial_formats_are_preserved() {
-    let (_dir, before, after, output) = fixture(
+    let (_dir, left, right, output) = fixture(
         "id,name,note\n001,東京本社,\"a\nb\"\n002,same,=1+1\n".as_bytes(),
         "id,name,note\n001,大阪本社,\"a\nc\"\n002,same,=2+2\n".as_bytes(),
     );
-    let result = execute(&before, &after, &output, false);
+    let result = execute(&left, &right, &output, false);
     assert_eq!(
         result.status.code(),
         Some(1),
@@ -102,9 +102,9 @@ fn original_coordinates_and_partial_formats_are_preserved() {
 
 #[test]
 fn empty_added_and_removed_cells_have_distinct_fills_without_extra_columns() {
-    let (_dir, before, after, output) = fixture(b"a,\n", b"a\nnew,\n");
+    let (_dir, left, right, output) = fixture(b"a,\n", b"a\nnew,\n");
     assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
+        execute(&left, &right, &output, false).status.code(),
         Some(1)
     );
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
@@ -160,8 +160,8 @@ fn empty_added_and_removed_cells_have_distinct_fills_without_extra_columns() {
 #[test]
 fn identical_and_empty_inputs_preserve_the_full_grid() {
     for input in [b"a,b\n".as_slice(), b"".as_slice()] {
-        let (_dir, before, after, output) = fixture(input, input);
-        let result = execute(&before, &after, &output, false);
+        let (_dir, left, right, output) = fixture(input, input);
+        let result = execute(&left, &right, &output, false);
         assert_eq!(result.status.code(), Some(0));
         let sheet = xml(&output, "xl/worksheets/sheet1.xml");
         let doc = roxmltree::Document::parse(&sheet).unwrap();
@@ -179,9 +179,9 @@ fn identical_and_empty_inputs_preserve_the_full_grid() {
 
 #[test]
 fn strings_keep_leading_zeros_and_formula_like_values() {
-    let (_dir, before, after, output) = fixture(b"001,=1\n", b"001,+2\n");
+    let (_dir, left, right, output) = fixture(b"001,=1\n", b"001,+2\n");
     assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
+        execute(&left, &right, &output, false).status.code(),
         Some(1)
     );
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
@@ -193,9 +193,9 @@ fn strings_keep_leading_zeros_and_formula_like_values() {
 
 #[test]
 fn unchanged_rows_are_not_collapsed_when_only_a_later_cell_changes() {
-    let (_dir, before, after, output) = fixture(b"a,b\nc,d\ne,f\n", b"a,b\nc,d\ne,g\n");
+    let (_dir, left, right, output) = fixture(b"a,b\nc,d\ne,f\n", b"a,b\nc,d\ne,g\n");
     assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
+        execute(&left, &right, &output, false).status.code(),
         Some(1)
     );
     let sheet = xml(&output, "xl/worksheets/sheet1.xml");
@@ -208,9 +208,9 @@ fn unchanged_rows_are_not_collapsed_when_only_a_later_cell_changes() {
 fn combined_replacement_limit_does_not_truncate_or_publish() {
     let old = format!("{}\n", "a".repeat(20000));
     let new = format!("{}\n", "b".repeat(20000));
-    let (_dir, before, after, output) = fixture(old.as_bytes(), new.as_bytes());
+    let (_dir, left, right, output) = fixture(old.as_bytes(), new.as_bytes());
     assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
+        execute(&left, &right, &output, false).status.code(),
         Some(2)
     );
     assert!(!output.exists());
@@ -219,9 +219,9 @@ fn combined_replacement_limit_does_not_truncate_or_publish() {
 #[test]
 fn too_many_input_columns_are_rejected_even_when_identical() {
     let input = vec!["a"; 16385].join(",");
-    let (_dir, before, after, output) = fixture(input.as_bytes(), input.as_bytes());
+    let (_dir, left, right, output) = fixture(input.as_bytes(), input.as_bytes());
     assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
+        execute(&left, &right, &output, false).status.code(),
         Some(2)
     );
     assert!(!output.exists());
@@ -229,22 +229,22 @@ fn too_many_input_columns_are_rejected_even_when_identical() {
 
 #[test]
 fn existing_output_is_protected_and_force_replaces_only_on_success() {
-    let (_dir, before, after, output) = fixture(b"a\n", b"b\n");
+    let (_dir, left, right, output) = fixture(b"a\n", b"b\n");
     fs::write(&output, "keep").unwrap();
     assert_eq!(
-        execute(&before, &after, &output, false).status.code(),
+        execute(&left, &right, &output, false).status.code(),
         Some(2)
     );
     assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
     assert_eq!(
-        execute(&before, &after, &output, true).status.code(),
+        execute(&left, &right, &output, true).status.code(),
         Some(1)
     );
     xml(&output, "xl/worksheets/sheet1.xml");
-    fs::write(&before, b"\xff\n").unwrap();
+    fs::write(&left, b"\xff\n").unwrap();
     let saved = fs::read(&output).unwrap();
     assert_eq!(
-        execute(&before, &after, &output, true).status.code(),
+        execute(&left, &right, &output, true).status.code(),
         Some(2)
     );
     assert_eq!(fs::read(&output).unwrap(), saved);
@@ -256,8 +256,8 @@ fn invalid_utf8_and_oversize_cell_publish_no_report() {
         vec![0xff, b'\n'],
         format!("{}\n", "a".repeat(32768)).into_bytes(),
     ] {
-        let (dir, before, after, output) = fixture(&old, b"b\n");
-        let result = execute(&before, &after, &output, false);
+        let (dir, left, right, output) = fixture(&old, b"b\n");
+        let result = execute(&left, &right, &output, false);
         assert_eq!(result.status.code(), Some(2));
         assert!(!output.exists());
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
@@ -266,24 +266,24 @@ fn invalid_utf8_and_oversize_cell_publish_no_report() {
 
 #[test]
 fn input_aliases_and_bad_output_paths_are_rejected() {
-    let (dir, before, after, output) = fixture(b"a\n", b"b\n");
+    let (dir, left, right, output) = fixture(b"a\n", b"b\n");
     let hardlink = dir.path().join("alias.xlsx");
-    fs::hard_link(&before, &hardlink).unwrap();
+    fs::hard_link(&left, &hardlink).unwrap();
     assert_eq!(
-        execute(&before, &after, &hardlink, true).status.code(),
+        execute(&left, &right, &hardlink, true).status.code(),
         Some(2)
     );
-    assert_eq!(fs::read(&before).unwrap(), b"a\n");
+    assert_eq!(fs::read(&left).unwrap(), b"a\n");
     assert_eq!(
-        execute(&before, &after, &output.with_extension("csv"), false)
+        execute(&left, &right, &output.with_extension("csv"), false)
             .status
             .code(),
         Some(2)
     );
     assert_eq!(
         execute(
-            &before,
-            &after,
+            &left,
+            &right,
             &dir.path().join("missing/report.xlsx"),
             false
         )
@@ -292,7 +292,7 @@ fn input_aliases_and_bad_output_paths_are_rejected() {
         Some(2)
     );
     assert_eq!(
-        execute(&dir.path().join("absent.csv"), &after, &output, false)
+        execute(&dir.path().join("absent.csv"), &right, &output, false)
             .status
             .code(),
         Some(2)

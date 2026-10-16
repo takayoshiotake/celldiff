@@ -11,10 +11,10 @@ use std::process::ExitCode;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Original UTF-8 CSV (first record is included)
-    before: PathBuf,
-    /// Updated UTF-8 CSV
-    after: PathBuf,
+    /// Left UTF-8 CSV, used as the comparison baseline (first record is included)
+    left: PathBuf,
+    /// Right UTF-8 CSV, compared against the left input
+    right: PathBuf,
     /// Output XLSX report
     #[arg(short, long, value_name = "FILE")]
     output: PathBuf,
@@ -24,12 +24,12 @@ struct Args {
 }
 
 fn run(args: Args) -> Result<bool, AppError> {
-    let mut before = CsvInput::open(&args.before)?;
-    let mut after = CsvInput::open(&args.after)?;
-    validate_paths(&args.before, &args.after, &args.output, args.force)?;
+    let mut left = CsvInput::open(&args.left)?;
+    let mut right = CsvInput::open(&args.right)?;
+    validate_paths(&args.left, &args.right, &args.output, args.force)?;
     let mut report = Report::new()?;
-    let summary = compare_all(&mut before, &mut after, |d| report.write(d))?;
-    report.save(&args.output, args.force, summary, &args.before, &args.after)?;
+    let summary = compare_all(&mut left, &mut right, |d| report.write(d))?;
+    report.save(&args.output, args.force, summary, &args.left, &args.right)?;
     println!(
         "changed_cells={} changed_records={} modified={} added={} removed={} output={}",
         summary.changed_cells,

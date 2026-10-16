@@ -8,20 +8,20 @@ pub struct Segment {
     pub value: String,
 }
 
-pub fn segments(before: &str, after: &str) -> Vec<Segment> {
-    if before == after {
-        return if before.is_empty() {
+pub fn segments(left: &str, right: &str) -> Vec<Segment> {
+    if left == right {
+        return if left.is_empty() {
             Vec::new()
         } else {
             vec![Segment {
                 tag: ChangeTag::Equal,
-                value: before.into(),
+                value: left.into(),
             }]
         };
     }
     let diff = TextDiff::configure()
         .timeout(Duration::from_millis(100))
-        .diff_graphemes(before, after);
+        .diff_graphemes(left, right);
     let mut result: Vec<Segment> = Vec::new();
     for change in diff.iter_all_changes() {
         if change.value().is_empty() {
@@ -44,8 +44,8 @@ pub fn segments(before: &str, after: &str) -> Vec<Segment> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn check(before: &str, after: &str) {
-        let parts = segments(before, after);
+    fn check(left: &str, right: &str) {
+        let parts = segments(left, right);
         let old: String = parts
             .iter()
             .filter(|p| p.tag != ChangeTag::Insert)
@@ -56,8 +56,8 @@ mod tests {
             .filter(|p| p.tag != ChangeTag::Delete)
             .map(|p| p.value.as_str())
             .collect();
-        assert_eq!(old, before);
-        assert_eq!(new, after);
+        assert_eq!(old, left);
+        assert_eq!(new, right);
         assert!(parts.iter().all(|p| !p.value.is_empty()));
         assert!(parts.windows(2).all(|p| p[0].tag != p[1].tag));
     }

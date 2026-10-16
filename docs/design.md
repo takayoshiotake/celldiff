@@ -8,6 +8,9 @@ GUI、キー照合、行の再対応、マージ、TSV・Excel入力は初期版
 
 ## 入力と対応づけ
 
+入力はleft／rightと呼び、leftを基準としたrightへの変更を表示する。
+leftだけにある文字・セルは削除、rightだけにある文字・セルは追加とする。
+
 - UTF-8。先頭のUTF-8 BOMは取り除く。不正UTF-8はエラーとし、置換しない。
 - カンマ区切り。引用符、引用符内改行、エスケープはcsv crateに任せる。
 - 独自の厳格なCSV構文検証は加えず、構文の許容範囲はcsv crateに従う。
@@ -108,7 +111,7 @@ xlsx生成とZIP圧縮のバッファ・書式・小さなSummaryにもメモリ
 
 ## CLI
 
-`celldiff BEFORE AFTER -o FILE [--force]`
+`celldiff LEFT RIGHT -o FILE [--force]`
 
 - 入力2件と出力先が必須。出力拡張子は.xlsx。
 - clapがヘルプ、バージョン、引数エラーを生成する。

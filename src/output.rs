@@ -34,8 +34,8 @@ pub fn validate_position(record: u64, column: usize) -> Result<(), AppError> {
 }
 
 pub fn validate_paths(
-    before: &Path,
-    after: &Path,
+    left: &Path,
+    right: &Path,
     output: &Path,
     force: bool,
 ) -> Result<(), AppError> {
@@ -47,7 +47,7 @@ pub fn validate_paths(
     }
     // Includes hard links and symlinks, rather than comparing path strings.
     if output.exists() {
-        for input in [before, after] {
+        for input in [left, right] {
             if same_file::is_same_file(input, output)? {
                 return Err(fail("Output must not refer to either input file"));
             }
@@ -111,7 +111,7 @@ impl Report {
                 .set_column_range_width(self.columns as u16, (cell.column - 1) as u16, 24)?;
             self.columns = cell.column;
         }
-        let differs = cell.before != cell.after;
+        let differs = cell.left != cell.right;
         let row = (cell.record - 1) as u32;
         let column = (cell.column - 1) as u16;
         let error_at = |error| {
@@ -120,12 +120,12 @@ impl Report {
                 cell.record, cell.column
             ))
         };
-        for value in [cell.before, cell.after].into_iter().flatten() {
+        for value in [cell.left, cell.right].into_iter().flatten() {
             validate_text(value).map_err(error_at)?;
         }
         if !differs {
             let sheet = self.workbook.worksheet_from_index(0)?;
-            if let Some(value) = cell.after {
+            if let Some(value) = cell.right {
                 if value.is_empty() {
                     sheet.write_blank(row, column, &self.cell)?;
                 } else {
@@ -134,7 +134,7 @@ impl Report {
             }
             return Ok(());
         }
-        let parts = text::segments(cell.before.unwrap_or(""), cell.after.unwrap_or(""));
+        let parts = text::segments(cell.left.unwrap_or(""), cell.right.unwrap_or(""));
         let combined: String = parts.iter().map(|part| part.value.as_str()).collect();
         // Replacements show removed + inserted text in the same cell.
         // Validate the rendered text too: two valid inputs may exceed the XLSX limit together.
@@ -171,18 +171,18 @@ impl Report {
         path: &Path,
         force: bool,
         summary: Summary,
-        before: &Path,
-        after: &Path,
+        left: &Path,
+        right: &Path,
     ) -> Result<(), AppError> {
         let sheet = self.workbook.add_worksheet();
         sheet.set_name("Summary")?;
         sheet.set_column_width(0, 24)?;
         sheet.set_column_width(1, 70)?;
         let entries = [
-            ("Before input", before.display().to_string()),
-            ("After input", after.display().to_string()),
-            ("Before records", summary.before_records.to_string()),
-            ("After records", summary.after_records.to_string()),
+            ("Left input", left.display().to_string()),
+            ("Right input", right.display().to_string()),
+            ("Left records", summary.before_records.to_string()),
+            ("Right records", summary.after_records.to_string()),
             ("Changed records", summary.changed_records.to_string()),
             ("Changed cells", summary.changed_cells.to_string()),
             ("Modified cells", summary.modified.to_string()),
@@ -199,7 +199,7 @@ impl Report {
             ),
             (
                 "Comparison",
-                "Positional; first record included; UTF-8; no normalization".into(),
+                "Left to right; positional; first record included; UTF-8; no normalization".into(),
             ),
             (
                 "Removed text",

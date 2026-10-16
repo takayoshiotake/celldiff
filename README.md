@@ -5,12 +5,13 @@ CSVをセル単位で比較し、文字単位の変更を強調したExcelレポ
 ## 使用方法
 
 ```sh
-celldiff before.csv after.csv -o diff.xlsx
-celldiff before.csv after.csv -o diff.xlsx --force
+celldiff left.csv right.csv -o diff.xlsx
+celldiff left.csv right.csv -o diff.xlsx --force
 celldiff --help
 ```
 
 - UTF-8のCSVに対応します（先頭BOMは許容）。Shift_JISは事前にUTF-8へ変換してください。
+- 入力はleft／rightと呼び、leftを基準としたrightへの変更を表示します。
 - 同じレコード番号・列位置で比較し、先頭レコードも比較対象です。
 - 値は文字列として扱い、先頭ゼロ・空白を保持します。
 - 途中へのレコード挿入や並べ替えでは、以降も位置に従って比較されます。
@@ -94,7 +95,7 @@ cargo build --release --locked
 cargo test --locked
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo run --locked -- examples/before.csv examples/after.csv -o sample.xlsx
+cargo run --locked -- examples/left.csv examples/right.csv -o sample.xlsx
 ```
 
 最後の例は差分があるので終了コード1になります。

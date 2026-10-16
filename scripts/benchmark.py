@@ -53,7 +53,7 @@ def measure(binary, rows, case):
         out = root / "output"
         tmp.mkdir()
         out.mkdir()
-        old, new = root / "before.csv", root / "after.csv"
+        old, new = root / "left.csv", root / "right.csv"
         expected = 0
         with old.open("w", newline="", encoding="utf-8") as a, new.open("w", newline="", encoding="utf-8") as b:
             wa, wb = csv.writer(a), csv.writer(b)

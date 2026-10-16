@@ -14,7 +14,7 @@ args = parser.parse_args()
 binary = args.binary.resolve(strict=True)
 with tempfile.TemporaryDirectory() as folder:
     output = Path(folder) / "sample.xlsx"
-    command = [str(binary), "examples/before.csv", "examples/after.csv", "-o", str(output)]
+    command = [str(binary), "examples/left.csv", "examples/right.csv", "-o", str(output)]
     result = subprocess.run(command, text=True, capture_output=True)
     assert result.returncode == 1, result.stderr
     assert "changed_cells=7 " in result.stdout, result.stdout
@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as folder:
         assert cell_text("A5") == "004"
     again = subprocess.run(command, text=True, capture_output=True)
     assert again.returncode == 2
-    identical = subprocess.run([str(binary), "examples/before.csv", "examples/before.csv", "-o",
+    identical = subprocess.run([str(binary), "examples/left.csv", "examples/left.csv", "-o",
         str(Path(folder) / "equal.xlsx")], text=True, capture_output=True)
     assert identical.returncode == 0
     target = Path("dist/sample.xlsx")
