@@ -181,8 +181,8 @@ impl Report {
         let entries = [
             ("Left input", left.display().to_string()),
             ("Right input", right.display().to_string()),
-            ("Left records", summary.before_records.to_string()),
-            ("Right records", summary.after_records.to_string()),
+            ("Left records", summary.left_records.to_string()),
+            ("Right records", summary.right_records.to_string()),
             ("Changed records", summary.changed_records.to_string()),
             ("Changed cells", summary.changed_cells.to_string()),
             ("Modified cells", summary.modified.to_string()),
