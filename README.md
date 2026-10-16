@@ -8,15 +8,44 @@ CSVをセル単位で比較し、文字単位の変更を強調したExcelレポ
 celldiff left.csv right.csv -o diff.xlsx
 celldiff left.csv right.csv -o diff.xlsx --force
 celldiff --help
+celldiff --list-encodings
 ```
 
-- UTF-8のCSVに対応します（先頭BOMは許容）。Shift_JISは事前にUTF-8へ変換してください。
+- 入力文字コードは左右別々に指定できます。省略した側はUTF-8です。自動検出は行いません。
 - 入力はleft／rightと呼び、leftを基準としたrightへの変更を表示します。
 - 同じレコード番号・列位置で比較し、先頭レコードも比較対象です。
 - 値は文字列として扱い、先頭ゼロ・空白を保持します。
 - 途中へのレコード挿入や並べ替えでは、以降も位置に従って比較されます。
 - 既存の出力は既定では上書きしません。`--force`でも入力ファイルとその別名は保護します。
 - GUI、キー照合、マージ、TSV・Excel入力はありません。
+
+## 入力文字コード
+
+```sh
+celldiff left.csv right.csv --encoding-left cp932 --encoding-right utf-8 -o diff.xlsx
+celldiff left.csv right.csv --el cp932 --er utf-8 -o diff.xlsx
+celldiff --list-encodings
+```
+
+`--el`／`--er`は`--encoding-left`／`--encoding-right`の別名です。
+共通設定は設けず、指定しなかった側はUTF-8として読みます。
+`--list-encodings`は入力ファイル・出力先なしで、対応する38種類の文字コード名と別名を表示します。
+名前は大文字・小文字を区別しません。一覧にない名前はエラーです。
+主な対応対象はUTF-8、UTF-16LE／BE、Shift_JIS系、EUC-JP、ISO-2022-JP、GBK／GB18030、Big5、EUC-KR、Windows-1250〜1258です。
+
+変換は`encoding_rs`のWHATWGマッピングに従います。
+`cp932`／`windows-31j`はShift_JISへ対応付けますが、Windows CP932とすべてのバイト列で完全同一ではありません。
+`ascii`／`iso-8859-1`／`latin1`はWindows-1252として扱います。厳密なASCII検証ではありません。
+UTF-32、エンディアンを明示しない`utf-16`、`auto`は受け付けません。
+
+先頭のBOMは指定した文字コードと一致する場合のみ除去し、矛盾するBOMはエラーにします。
+UTF-32のBOMもエラーです。UTF-16LE／BEはBOMなしでも明示指定で読めます。
+不正なバイト列・末尾で途切れた文字は置換せず、終了コード2で終了します。
+エラー時は既存の出力を保持します。
+
+内部では読みながらUTF-8へ変換し、CSV解析へ渡します。全入力をメモリへ保持しません。
+エラー位置に表示されるバイト位置は、変換後のUTF-8上の位置です。
+実際に使用した文字コード名はSummaryのLeft encoding／Right encodingに記録します。
 
 ## Excelレポート
 

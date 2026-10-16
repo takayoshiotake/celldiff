@@ -43,6 +43,37 @@ fn cell_text(value: &str, address: &str) -> String {
         .filter_map(|n| n.text())
         .collect()
 }
+fn workbook_cell_text(path: &Path, sheet: &str, address: &str) -> String {
+    let value = xml(path, sheet);
+    let doc = roxmltree::Document::parse(&value).unwrap();
+    let cell = doc
+        .descendants()
+        .find(|n| n.has_tag_name("c") && n.attribute("r") == Some(address))
+        .unwrap();
+    if cell.attribute("t") != Some("s") {
+        return cell_text(&value, address);
+    }
+    let index: usize = cell
+        .children()
+        .find(|n| n.has_tag_name("v"))
+        .unwrap()
+        .text()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let strings = xml(path, "xl/sharedStrings.xml");
+    let strings = roxmltree::Document::parse(&strings).unwrap();
+    strings
+        .descendants()
+        .filter(|n| n.has_tag_name("si"))
+        .nth(index)
+        .unwrap()
+        .descendants()
+        .filter(|n| n.has_tag_name("t"))
+        .filter_map(|n| n.text())
+        .collect()
+}
+
 fn fixture(
     old: &[u8],
     new: &[u8],
@@ -308,4 +339,147 @@ fn help_version_and_argument_errors_are_consistent() {
         cli(&[std::ffi::OsStr::new("--unknown")]).status.code(),
         Some(2)
     );
+}
+
+fn execute_encoded(left: &Path, right: &Path, output: &Path, options: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_celldiff"))
+        .arg(left)
+        .arg(right)
+        .arg("-o")
+        .arg(output)
+        .args(options)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn explicit_encodings_compare_same_values_and_record_selected_names() {
+    let text = "id,name,note\n001,東京,\"a,b\nc\"\n002,,\n";
+    let (encoded, _, errors) = encoding_rs::SHIFT_JIS.encode(text);
+    assert!(!errors);
+    for options in [
+        vec!["--encoding-left", "cp932"],
+        vec!["--el", "WINDOWS-31J", "--er", "utf8"],
+    ] {
+        let (_dir, left, right, output) = fixture(&encoded, text.as_bytes());
+        let result = execute_encoded(&left, &right, &output, &options);
+        assert_eq!(
+            result.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let sheet = xml(&output, "xl/worksheets/sheet1.xml");
+        assert_eq!(cell_text(&sheet, "A2"), "001");
+        assert_eq!(cell_text(&sheet, "B2"), "東京");
+        assert_eq!(cell_text(&sheet, "C2"), "a,b\nc");
+        assert_eq!(
+            workbook_cell_text(&output, "xl/worksheets/sheet2.xml", "A3"),
+            "Left encoding"
+        );
+        assert_eq!(
+            workbook_cell_text(&output, "xl/worksheets/sheet2.xml", "B3"),
+            "Shift_JIS"
+        );
+        assert_eq!(
+            workbook_cell_text(&output, "xl/worksheets/sheet2.xml", "A4"),
+            "Right encoding"
+        );
+        assert_eq!(
+            workbook_cell_text(&output, "xl/worksheets/sheet2.xml", "B4"),
+            "UTF-8"
+        );
+    }
+    let (_dir, left, right, output) = fixture(text.as_bytes(), &encoded);
+    let result = execute_encoded(&left, &right, &output, &["--encoding-right", "cp932"]);
+    assert_eq!(result.status.code(), Some(0));
+    let (encoded, _, _) = encoding_rs::SHIFT_JIS.encode("001,東京本社\n");
+    let (_dir, left, right, output) = fixture(&encoded, "001,大阪本社\n".as_bytes());
+    let result = execute_encoded(&left, &right, &output, &["--el", "cp932"]);
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        cell_text(&xml(&output, "xl/worksheets/sheet1.xml"), "B1"),
+        "東京大阪本社"
+    );
+}
+
+#[test]
+fn utf16_with_and_without_bom_matches_utf8() {
+    let text = "001,東京😀\n";
+    for (encoding, big_endian, bom) in [
+        ("utf-16le", false, false),
+        ("utf-16le", false, true),
+        ("utf-16be", true, false),
+        ("utf-16be", true, true),
+    ] {
+        let mut data = Vec::new();
+        if bom {
+            data.extend_from_slice(if big_endian { b"\xfe\xff" } else { b"\xff\xfe" });
+        }
+        for unit in text.encode_utf16() {
+            data.extend_from_slice(&if big_endian {
+                unit.to_be_bytes()
+            } else {
+                unit.to_le_bytes()
+            });
+        }
+        let (_dir, left, right, output) = fixture(text.as_bytes(), &data);
+        let result = execute_encoded(&left, &right, &output, &["--er", encoding]);
+        assert_eq!(
+            result.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}
+
+#[test]
+fn encoding_errors_preserve_output_and_identify_input() {
+    for (data, encoding) in [
+        (b"a\x82".as_slice(), "cp932"),
+        (b"a\0b".as_slice(), "utf-16le"),
+        (b"\xff\xfeA\0".as_slice(), "utf-8"),
+        (b"\xfe\xff\0A".as_slice(), "utf-16le"),
+    ] {
+        let (_dir, left, right, output) = fixture(b"a\n", data);
+        fs::write(&output, "keep").unwrap();
+        let result = execute_encoded(&left, &right, &output, &["--force", "--er", encoding]);
+        assert_eq!(result.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&result.stderr).contains("right file.csv"));
+        assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
+        fs::remove_file(&output).unwrap();
+        let result = execute_encoded(&left, &right, &output, &["--er", encoding]);
+        assert_eq!(result.status.code(), Some(2));
+        assert!(!output.exists());
+    }
+    let (_dir, left, right, output) = fixture(b"a\n", b"b\n");
+    let result = execute_encoded(&left, &right, &output, &["--el", "auto"]);
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("--list-encodings"));
+    assert!(!output.exists());
+}
+
+#[test]
+fn encoding_listing_needs_no_paths_and_help_shows_aliases() {
+    let result = cli(&[std::ffi::OsStr::new("--list-encodings")]);
+    assert_eq!(result.status.code(), Some(0));
+    let list = String::from_utf8(result.stdout).unwrap();
+    for (name, aliases) in celldiff::encoding::ENCODINGS {
+        assert!(list.contains(name));
+        for alias in *aliases {
+            assert!(list.contains(alias));
+        }
+    }
+    let help = cli(&[std::ffi::OsStr::new("--help")]);
+    let help = String::from_utf8(help.stdout).unwrap();
+    for name in [
+        "--encoding-left",
+        "--encoding-right",
+        "--el",
+        "--er",
+        "--list-encodings",
+    ] {
+        assert!(help.contains(name), "{name}: {help}");
+    }
 }

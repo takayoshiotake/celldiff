@@ -5,6 +5,7 @@ edition = "2024"
 description = "Compare CSV cells and export character-highlighted differences to XLSX"
 
 [dependencies]
+encoding_rs = "0.8"
 csv = "1.4"
 similar = { version = "3.2", features = ["unicode"] }
 rust_xlsxwriter = { version = "0.99", features = ["constant_memory"] }

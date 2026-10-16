@@ -11,7 +11,14 @@ GUI、キー照合、行の再対応、マージ、TSV・Excel入力は初期版
 入力はleft／rightと呼び、leftを基準としたrightへの変更を表示する。
 leftだけにある文字・セルは削除、rightだけにある文字・セルは追加とする。
 
-- UTF-8。先頭のUTF-8 BOMは取り除く。不正UTF-8はエラーとし、置換しない。
+- 左右別々に文字コードを明示指定する。省略時はUTF-8。自動検出・共通指定は設けない。
+- encoding_rsのWHATWGマッピングを使い、encodingモジュールの38種類と公開別名だけを受け付ける。
+- DecodedReaderが固定サイズの入力・出力バッファでUTF-8へ逐次変換する。
+- 置換なしのデコーダーを使い、不正なバイト列・末尾の不完全な文字はエラーとする。
+- BOMは指定と一致する場合だけ除去する。不一致BOM・UTF-32 BOMはエラーとする。
+- UTF-16LE／BEはBOMなしでも明示指定で扱う。UTF-32・曖昧なutf-16・autoは受け付けない。
+- cp932／windows-31jはShift_JISへ対応付けるがWindows CP932の完全な互換実装とはしない。
+- ascii／iso-8859-1／latin1はWHATWGに従いWindows-1252へ対応付ける。
 - カンマ区切り。引用符、引用符内改行、エスケープはcsv crateに任せる。
 - 独自の厳格なCSV構文検証は加えず、構文の許容範囲はcsv crateに従う。
 - 先頭レコードもデータ。ヘッダーを自動検出・除外しない。
@@ -23,6 +30,7 @@ leftだけにある文字・セルは削除、rightだけにある文字・セ�
 
 `CsvInput<R: Read>`が読み込み元を所有し、呼び出し側の`StringRecord`を再利用する。
 入力エラーは入力名と、取得可能なレコード・物理行・バイト位置、元のエラーを保持する。
+バイト位置は変換後のUTF-8上の位置であり、元ファイルのバイトオフセットではない。
 
 ## セル比較
 
@@ -76,7 +84,7 @@ compare_allは同じセルも含む全セルを、元の座標とバッファ内
 | 比較元だけに存在 | 薄い赤 |
 
 存在する空値はセルを明示的に書き込み、追加・削除の空値も背景色で区別する。
-Summaryに件数・入力・凡例を記載し、表の行列を増やすメタデータは置かない。
+Summaryに件数・入力・左右の使用文字コード名・凡例を記載し、表の行列を増やすメタデータは置かない。
 差分がない場合も全入力セルとSummaryを出力する。
 
 `rust_xlsxwriter`のconstant-memoryモードを使い、入力座標順に書き込む。
@@ -111,19 +119,24 @@ xlsx生成とZIP圧縮のバッファ・書式・小さなSummaryにもメモリ
 
 ## CLI
 
-`celldiff LEFT RIGHT -o FILE [--force]`
+`celldiff LEFT RIGHT -o FILE [--force] [--encoding-left ENCODING] [--encoding-right ENCODING]`
 
-- 入力2件と出力先が必須。出力拡張子は.xlsx。
+`celldiff --list-encodings`
+
+- 比較時は入力2件と出力先が必須。出力拡張子は.xlsx。
+- --list-encodingsは入力・出力先なしで対応名と別名を表示し、0で終了する。
+- --encoding-left／--encoding-rightの公開別名は--el／--er。ヘルプに両方を表示する。
 - clapがヘルプ、バージョン、引数エラーを生成する。
 - 終了コード0:差分なし、1:差分あり、2:実行エラー。
 - ヘルプ・バージョン表示は0。
 - 標準出力は件数・出力先、標準エラーは実行エラー。
-- 入力文字コードやヘッダーのオプションは初期版に設けない。
+- ヘッダーを特別扱いするオプションは設けない。
 
 ## ライブラリと構成
 
 | crate | 用途・理由 |
 | --- | --- |
+| encoding_rs | 明示指定した文字コードの厳格な逐次変換 |
 | csv | CSV構文と順次読み込み、再利用するStringRecord |
 | similar（unicode） | 書記素クラスタでの差分、計算時間目安 |
 | rust_xlsxwriter（constant_memory） | Rustでxlsx生成、省メモリと部分文字書式 |
@@ -132,7 +145,7 @@ xlsx生成とZIP圧縮のバッファ・書式・小さなSummaryにもメモリ
 | same-file | OSを跨ぐ同一ファイル判定 |
 | zip / roxmltree（テストのみ） | xlsxのZIPとXMLの値・書式を検証 |
 
-単一Cargoパッケージ内でinput、compare、text、output、mainに責務を分ける。
+単一Cargoパッケージ内でencoding、input、compare、text、output、mainに責務を分ける。
 Cargo.tomlに依存・配布設定、Cargo.lockに正確な解決バージョンを記録する。
 Excel、Git、Pythonは配布exeの実行要件ではない。
 
@@ -153,4 +166,4 @@ macOSではOS標準ライブラリへ依存する。実際の依存とサイズ�
 
 実際のMicrosoft Excel上の見え方は別途目視確認する。XML検証を目視成功と扱わない。
 サンプルxlsxと確認項目を用意する。
-Shift_JIS、キー照合、他の入力形式、マージ、追加アーキテクチャは別の拡張として扱う。
+キー照合、他の入力形式、マージ、追加アーキテクチャは別の拡張として扱う。

@@ -1,4 +1,4 @@
-//! Streaming UTF-8 CSV input. Every record, including the first, is data.
+//! Streaming CSV input decoded to UTF-8. Every record, including the first, is data.
 
 use std::error::Error;
 use std::fmt;
@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use crate::encoding::{DecodedReader, InputEncoding};
 use csv::{Reader, ReaderBuilder, StringRecord, Trim};
 
 #[derive(Debug)]
@@ -83,6 +84,25 @@ impl CsvInput<File> {
             source: source.into(),
         })?;
         Ok(Self::new(file, input))
+    }
+}
+
+impl CsvInput<DecodedReader<File>> {
+    pub fn open_encoded(
+        path: impl AsRef<Path>,
+        encoding: InputEncoding,
+    ) -> Result<Self, InputError> {
+        let path = path.as_ref();
+        let input = path.display().to_string();
+        let open = || {
+            let file = File::open(path)?;
+            DecodedReader::new(file, encoding)
+        };
+        let reader = open().map_err(|source: std::io::Error| InputError {
+            input: input.clone(),
+            source: source.into(),
+        })?;
+        Ok(Self::new(reader, input))
     }
 }
 

@@ -173,6 +173,7 @@ impl Report {
         summary: Summary,
         left: &Path,
         right: &Path,
+        encodings: (&str, &str),
     ) -> Result<(), AppError> {
         let sheet = self.workbook.add_worksheet();
         sheet.set_name("Summary")?;
@@ -181,6 +182,8 @@ impl Report {
         let entries = [
             ("Left input", left.display().to_string()),
             ("Right input", right.display().to_string()),
+            ("Left encoding", encodings.0.to_string()),
+            ("Right encoding", encodings.1.to_string()),
             ("Left records", summary.left_records.to_string()),
             ("Right records", summary.right_records.to_string()),
             ("Changed records", summary.changed_records.to_string()),
@@ -199,7 +202,7 @@ impl Report {
             ),
             (
                 "Comparison",
-                "Left to right; positional; first record included; UTF-8; no normalization".into(),
+                "Left to right; positional; first record included; explicit encodings; no normalization".into(),
             ),
             (
                 "Removed text",
