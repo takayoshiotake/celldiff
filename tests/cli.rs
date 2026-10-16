@@ -236,17 +236,11 @@ fn existing_output_is_protected_and_force_replaces_only_on_success() {
         Some(2)
     );
     assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
-    assert_eq!(
-        execute(&left, &right, &output, true).status.code(),
-        Some(1)
-    );
+    assert_eq!(execute(&left, &right, &output, true).status.code(), Some(1));
     xml(&output, "xl/worksheets/sheet1.xml");
     fs::write(&left, b"\xff\n").unwrap();
     let saved = fs::read(&output).unwrap();
-    assert_eq!(
-        execute(&left, &right, &output, true).status.code(),
-        Some(2)
-    );
+    assert_eq!(execute(&left, &right, &output, true).status.code(), Some(2));
     assert_eq!(fs::read(&output).unwrap(), saved);
 }
 
