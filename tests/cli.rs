@@ -483,3 +483,140 @@ fn encoding_listing_needs_no_paths_and_help_shows_aliases() {
         assert!(help.contains(name), "{name}: {help}");
     }
 }
+
+fn cli_in(directory: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_celldiff"))
+        .current_dir(directory)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn omitted_output_uses_diff_xlsx_in_working_directory() {
+    for (right, code) in [("001,same\n", 0), ("001,changed\n", 1)] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("left.csv"), "001,same\n").unwrap();
+        fs::write(dir.path().join("right.csv"), right).unwrap();
+        let result = cli_in(dir.path(), &["left.csv", "right.csv"]);
+        assert_eq!(
+            result.status.code(),
+            Some(code),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            cell_text(
+                &xml(&dir.path().join("diff.xlsx"), "xl/worksheets/sheet1.xml"),
+                "A1"
+            ),
+            "001"
+        );
+        assert!(String::from_utf8_lossy(&result.stdout).contains("output=diff.xlsx"));
+    }
+}
+
+#[test]
+fn explicit_output_does_not_create_default_file() {
+    for option in ["-o", "--output"] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("left.csv"), "a\n").unwrap();
+        fs::write(dir.path().join("right.csv"), "b\n").unwrap();
+        let result = cli_in(
+            dir.path(),
+            &["left.csv", "right.csv", option, "selected.xlsx"],
+        );
+        assert_eq!(result.status.code(), Some(1));
+        xml(
+            &dir.path().join("selected.xlsx"),
+            "xl/worksheets/sheet1.xml",
+        );
+        assert!(!dir.path().join("diff.xlsx").exists());
+    }
+}
+
+#[test]
+fn default_output_is_protected_and_force_only_replaces_on_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("diff.xlsx");
+    fs::write(dir.path().join("left.csv"), "a\n").unwrap();
+    fs::write(dir.path().join("right.csv"), "b\n").unwrap();
+    fs::write(&output, "keep").unwrap();
+    assert_eq!(
+        cli_in(dir.path(), &["left.csv", "right.csv"]).status.code(),
+        Some(2)
+    );
+    assert_eq!(fs::read_to_string(&output).unwrap(), "keep");
+    assert_eq!(
+        cli_in(dir.path(), &["left.csv", "right.csv", "--force"])
+            .status
+            .code(),
+        Some(1)
+    );
+    xml(&output, "xl/worksheets/sheet1.xml");
+    let saved = fs::read(&output).unwrap();
+    fs::write(dir.path().join("right.csv"), b"\xff\n").unwrap();
+    assert_eq!(
+        cli_in(dir.path(), &["left.csv", "right.csv", "--force"])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&output).unwrap(), saved);
+    fs::remove_file(&output).unwrap();
+    assert_eq!(
+        cli_in(dir.path(), &["left.csv", "right.csv"]).status.code(),
+        Some(2)
+    );
+    assert!(!output.exists());
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn default_output_never_overwrites_input_or_its_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("left.csv");
+    let output = dir.path().join("diff.xlsx");
+    fs::write(&input, "a\n").unwrap();
+    fs::write(dir.path().join("right.csv"), "b\n").unwrap();
+    fs::hard_link(&input, &output).unwrap();
+    assert_eq!(
+        cli_in(dir.path(), &["left.csv", "right.csv", "--force"])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read_to_string(&input).unwrap(), "a\n");
+    assert_eq!(
+        cli_in(dir.path(), &["diff.xlsx", "right.csv", "--force"])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read_to_string(&output).unwrap(), "a\n");
+    #[cfg(unix)]
+    {
+        fs::remove_file(&output).unwrap();
+        std::os::unix::fs::symlink(&input, &output).unwrap();
+        assert_eq!(
+            cli_in(dir.path(), &["left.csv", "right.csv", "--force"])
+                .status
+                .code(),
+            Some(2)
+        );
+        assert_eq!(fs::read_to_string(&input).unwrap(), "a\n");
+    }
+}
+
+#[test]
+fn informational_options_never_create_default_output() {
+    for option in ["--help", "--version", "--list-encodings"] {
+        let dir = tempfile::tempdir().unwrap();
+        let result = cli_in(dir.path(), &[option]);
+        assert_eq!(result.status.code(), Some(0));
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        if option == "--help" {
+            assert!(String::from_utf8_lossy(&result.stdout).contains("[default: diff.xlsx]"));
+        }
+    }
+}

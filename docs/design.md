@@ -119,11 +119,13 @@ xlsx生成とZIP圧縮のバッファ・書式・小さなSummaryにもメモリ
 
 ## CLI
 
-`celldiff LEFT RIGHT -o FILE [--force] [--encoding-left ENCODING] [--encoding-right ENCODING]`
+`celldiff LEFT RIGHT [-o FILE] [--force] [--encoding-left ENCODING] [--encoding-right ENCODING]`
 
 `celldiff --list-encodings`
 
-- 比較時は入力2件と出力先が必須。出力拡張子は.xlsx。
+- 比較時は入力2件が必須。-o／--outputは省略でき、カレントディレクトリのdiff.xlsxへ出力する。明示指定時は指定先だけに出力する。出力拡張子は.xlsx。
+- 既定出力にも既存ファイル・入力別名の保護、--force、失敗時の既存出力保持を適用する。
+- --list-encodings・ヘルプ・バージョン表示では既定出力を生成しない。
 - --list-encodingsは入力・出力先なしで対応名と別名を表示し、0で終了する。
 - --encoding-left／--encoding-rightの公開別名は--el／--er。ヘルプに両方を表示する。
 - clapがヘルプ、バージョン、引数エラーを生成する。

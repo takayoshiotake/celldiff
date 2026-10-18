@@ -5,6 +5,7 @@ CSVをセル単位で比較し、文字単位の変更を強調したExcelレポ
 ## 使用方法
 
 ```sh
+celldiff left.csv right.csv
 celldiff left.csv right.csv -o diff.xlsx
 celldiff left.csv right.csv -o diff.xlsx --force
 celldiff --help
@@ -16,6 +17,7 @@ celldiff --list-encodings
 - 同じレコード番号・列位置で比較し、先頭レコードも比較対象です。
 - 値は文字列として扱い、先頭ゼロ・空白を保持します。
 - 途中へのレコード挿入や並べ替えでは、以降も位置に従って比較されます。
+- `-o`／`--output`は省略可能で、既定の出力先はカレントディレクトリの`diff.xlsx`です。
 - 既存の出力は既定では上書きしません。`--force`でも入力ファイルとその別名は保護します。
 - GUI、キー照合、マージ、TSV・Excel入力はありません。
 

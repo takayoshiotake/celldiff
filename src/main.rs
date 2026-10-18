@@ -19,13 +19,8 @@ struct Args {
     #[arg(required_unless_present = "list_encodings")]
     right: Option<PathBuf>,
     /// Output XLSX report
-    #[arg(
-        short,
-        long,
-        value_name = "FILE",
-        required_unless_present = "list_encodings"
-    )]
-    output: Option<PathBuf>,
+    #[arg(short, long, value_name = "FILE", default_value = "diff.xlsx")]
+    output: PathBuf,
     /// Replace an existing report (input files are always protected)
     #[arg(long)]
     force: bool,
@@ -58,7 +53,7 @@ fn run(args: Args) -> Result<bool, AppError> {
     // clap requires these unless --list-encodings is present.
     let left_path = args.left.as_ref().expect("left required by clap");
     let right_path = args.right.as_ref().expect("right required by clap");
-    let output = args.output.as_ref().expect("output required by clap");
+    let output = &args.output;
     let mut left = CsvInput::open_encoded(left_path, args.encoding_left)?;
     let mut right = CsvInput::open_encoded(right_path, args.encoding_right)?;
     validate_paths(left_path, right_path, output, args.force)?;
