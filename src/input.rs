@@ -7,6 +7,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::encoding::{DecodedReader, InputEncoding};
+use crate::quote_tracking::TrackedReader;
 use csv::{Reader, ReaderBuilder, StringRecord, Trim};
 
 #[derive(Debug)]
@@ -40,29 +41,63 @@ impl Error for InputError {
 /// A bounded-memory reader. The caller owns and reuses its record buffer.
 /// Empty physical lines are skipped by the CSV parser.
 pub struct CsvInput<R: Read> {
-    reader: Reader<R>,
+    reader: Reader<TrackedReader<R>>,
     input: String,
     records_read: u64,
+    quoted: Vec<bool>,
 }
 
 impl<R: Read> CsvInput<R> {
     pub fn new(reader: R, input: impl Into<String>) -> Self {
+        Self::new_with_quotes(reader, input, false)
+    }
+
+    pub fn new_with_quotes(reader: R, input: impl Into<String>, compare_quotes: bool) -> Self {
         Self {
             reader: ReaderBuilder::new()
                 .has_headers(false)
                 .flexible(true)
                 .trim(Trim::None)
-                .from_reader(reader),
+                .from_reader(TrackedReader::new(reader, compare_quotes)),
             input: input.into(),
             records_read: 0,
+            quoted: Vec::new(),
         }
+    }
+
+    pub fn compares_quotes(&self) -> bool {
+        self.reader.get_ref().enabled()
+    }
+
+    pub fn is_quoted(&self, column: usize) -> bool {
+        self.quoted.get(column).copied().unwrap_or(false)
     }
 
     /// Returns the 1-based record number, or None at EOF.
     /// The buffer is overwritten; borrowed cells must not outlive the next read.
     pub fn read_record(&mut self, buffer: &mut StringRecord) -> Result<Option<u64>, InputError> {
+        self.quoted.clear();
         match self.reader.read_record(buffer) {
             Ok(true) => {
+                if self.compares_quotes() {
+                    let end = self.reader.position().byte();
+                    self.reader
+                        .get_mut()
+                        .record_quotes(end, &mut self.quoted)
+                        .map_err(|source| InputError {
+                            input: self.input.clone(),
+                            source: source.into(),
+                        })?;
+                    if self.quoted.len() != buffer.len() {
+                        return Err(InputError {
+                            input: self.input.clone(),
+                            source: std::io::Error::other(
+                                "CSV quote metadata does not match parsed fields",
+                            )
+                            .into(),
+                        });
+                    }
+                }
                 self.records_read += 1;
                 Ok(Some(self.records_read))
             }
@@ -92,6 +127,14 @@ impl CsvInput<DecodedReader<File>> {
         path: impl AsRef<Path>,
         encoding: InputEncoding,
     ) -> Result<Self, InputError> {
+        Self::open_encoded_with_quotes(path, encoding, false)
+    }
+
+    pub fn open_encoded_with_quotes(
+        path: impl AsRef<Path>,
+        encoding: InputEncoding,
+        compare_quotes: bool,
+    ) -> Result<Self, InputError> {
         let path = path.as_ref();
         let input = path.display().to_string();
         let open = || {
@@ -102,7 +145,7 @@ impl CsvInput<DecodedReader<File>> {
             input: input.clone(),
             source: source.into(),
         })?;
-        Ok(Self::new(reader, input))
+        Ok(Self::new_with_quotes(reader, input, compare_quotes))
     }
 }
 
@@ -198,5 +241,102 @@ mod tests {
         assert_eq!(error.input(), "left.csv");
         assert!(error.to_string().contains("read failed"));
         assert!(error.source().is_some());
+    }
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::*;
+
+    fn parse<R: Read>(source: R) -> Vec<(Vec<String>, Vec<bool>)> {
+        let mut reader = CsvInput::new_with_quotes(source, "quotes.csv", true);
+        let mut record = StringRecord::new();
+        let mut rows = Vec::new();
+        while reader.read_record(&mut record).unwrap().is_some() {
+            rows.push((
+                record.iter().map(str::to_owned).collect(),
+                (0..record.len()).map(|i| reader.is_quoted(i)).collect(),
+            ));
+        }
+        rows
+    }
+
+    struct Short<'a>(&'a [u8]);
+    impl Read for Short<'_> {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            let size = self.0.len().min(out.len()).min(1);
+            out[..size].copy_from_slice(&self.0[..size]);
+            self.0 = &self.0[size..];
+            Ok(size)
+        }
+    }
+
+    #[test]
+    fn tracks_bom_blank_lines_escaped_quotes_and_multiline_fields() {
+        let data = b"\xef\xbb\xbf\r\n\n1,\"1\",,\"\"\r\n\n\"a,b\",\"a\r\nb\",\"a\"\"b\",z\nlast,\n";
+        let rows = parse(data.as_slice());
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    vec!["1".into(), "1".into(), "".into(), "".into()],
+                    vec![false, true, false, true]
+                ),
+                (
+                    vec!["a,b".into(), "a\r\nb".into(), "a\"b".into(), "z".into()],
+                    vec![true, true, true, false]
+                ),
+                (vec!["last".into(), "".into()], vec![false, false]),
+            ]
+        );
+        assert_eq!(parse(Short(&data[3..])), rows);
+        // csv-core treats a BOM split across its initial reads as data. The
+        // CLI's DecodedReader removes the BOM first; preserve the generic
+        // CsvInput parser behavior without introducing a metadata error.
+        let split = parse(Short(data));
+        assert_eq!(split[0], (vec!["\u{feff}".into()], vec![false]));
+        assert_eq!(&split[1..], rows.as_slice());
+    }
+
+    #[test]
+    fn tracks_records_across_buffers_without_leaking_previous_flags() {
+        let text = format!(
+            "plain,\"{}\"\n\"quoted\"\nlast,\n",
+            "a,\"\"b\n".repeat(5000)
+        );
+        let rows = parse(text.as_bytes());
+        assert_eq!(rows[0].1, vec![false, true]);
+        assert_eq!(rows[1].1, vec![true]);
+        assert_eq!(rows[2].1, vec![false, false]);
+        assert_eq!(rows[0].0[1], "a,\"b\n".repeat(5000));
+    }
+
+    #[test]
+    fn quote_tracking_preserves_csv_parser_acceptance_for_short_inputs() {
+        let alphabet = b"a,\"\r\n ";
+        // Exercise permissive CSV forms too, including unclosed quotes and
+        // characters following a closing quote. csv remains the value parser.
+        for length in 0..=5 {
+            for mut number in 0..alphabet.len().pow(length) {
+                let mut data = vec![0; length as usize];
+                for byte in &mut data {
+                    *byte = alphabet[number % alphabet.len()];
+                    number /= alphabet.len();
+                }
+                let actual = parse(data.as_slice());
+                let mut baseline = CsvInput::new(data.as_slice(), "baseline");
+                let mut buffer = StringRecord::new();
+                let mut expected = Vec::new();
+                while baseline.read_record(&mut buffer).unwrap().is_some() {
+                    expected.push(buffer.iter().map(str::to_owned).collect::<Vec<_>>());
+                }
+                assert_eq!(
+                    actual.iter().map(|r| r.0.clone()).collect::<Vec<_>>(),
+                    expected,
+                    "input={:?}",
+                    String::from_utf8_lossy(&data)
+                );
+            }
+        }
     }
 }

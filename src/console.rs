@@ -26,10 +26,16 @@ fn address(style: AddressStyle, row: u64, mut column: usize) -> String {
     }
 }
 
-fn value(writer: &mut impl Write, value: Option<&str>) -> io::Result<()> {
+fn value(writer: &mut impl Write, value: Option<&str>, quoted: Option<bool>) -> io::Result<()> {
     match value {
         // Rust's quoted debug representation escapes controls, quotes and backslashes.
-        Some(text) => write!(writer, "{text:?}"),
+        Some(text) => {
+            write!(writer, "{text:?}")?;
+            if let Some(quoted) = quoted {
+                write!(writer, " [{}]", if quoted { "quoted" } else { "unquoted" })?;
+            }
+            Ok(())
+        }
         None => write!(writer, "<missing>"),
     }
 }
@@ -53,16 +59,16 @@ impl<W: Write> TextReport<W> {
         let address = address(self.address_style, cell.record, cell.column);
         if self.oneline {
             write!(self.writer, "{address}: ")?;
-            value(&mut self.writer, cell.left)?;
+            value(&mut self.writer, cell.left, cell.quotes.map(|q| q.left))?;
             write!(self.writer, " -> ")?;
-            value(&mut self.writer, cell.right)?;
+            value(&mut self.writer, cell.right, cell.quotes.map(|q| q.right))?;
             writeln!(self.writer)?;
         } else {
             writeln!(self.writer, "{address}:")?;
             write!(self.writer, "  - ")?;
-            value(&mut self.writer, cell.left)?;
+            value(&mut self.writer, cell.left, cell.quotes.map(|q| q.left))?;
             write!(self.writer, "\n  + ")?;
-            value(&mut self.writer, cell.right)?;
+            value(&mut self.writer, cell.right, cell.quotes.map(|q| q.right))?;
             writeln!(self.writer, "\n")?;
         }
         Ok(())
@@ -132,7 +138,8 @@ mod tests {
                     record: 1,
                     column: 1,
                     left: Some("a"),
-                    right: Some("b")
+                    right: Some("b"),
+                    quotes: None,
                 })
                 .unwrap_err()
                 .kind(),

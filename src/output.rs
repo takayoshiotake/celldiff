@@ -64,6 +64,7 @@ pub fn validate_paths(
 
 pub struct Report {
     workbook: Workbook,
+    compare_quotes: bool,
     columns: usize,
     normal: Format,
     removed: Format,
@@ -76,12 +77,17 @@ pub struct Report {
 
 impl Report {
     pub fn new() -> Result<Self, AppError> {
+        Self::new_with_quotes(false)
+    }
+
+    pub fn new_with_quotes(compare_quotes: bool) -> Result<Self, AppError> {
         let mut workbook = Workbook::new();
         let sheet = workbook.add_worksheet_with_constant_memory();
         sheet.set_name("Differences")?;
         // No metadata header: CSV record 1, field 1 stays at Excel A1.
         Ok(Self {
             workbook,
+            compare_quotes,
             columns: 0,
             normal: Format::new(),
             removed: Format::new()
@@ -111,7 +117,9 @@ impl Report {
                 .set_column_range_width(self.columns as u16, (cell.column - 1) as u16, 24)?;
             self.columns = cell.column;
         }
-        let differs = cell.left != cell.right;
+        let differs = cell.differs();
+        let left = cell.display_left();
+        let right = cell.display_right();
         let row = (cell.record - 1) as u32;
         let column = (cell.column - 1) as u16;
         let error_at = |error| {
@@ -120,12 +128,15 @@ impl Report {
                 cell.record, cell.column
             ))
         };
-        for value in [cell.left, cell.right].into_iter().flatten() {
+        for value in [cell.left, cell.right, left.as_deref(), right.as_deref()]
+            .into_iter()
+            .flatten()
+        {
             validate_text(value).map_err(error_at)?;
         }
         if !differs {
             let sheet = self.workbook.worksheet_from_index(0)?;
-            if let Some(value) = cell.right {
+            if let Some(value) = right.as_deref() {
                 if value.is_empty() {
                     sheet.write_blank(row, column, &self.cell)?;
                 } else {
@@ -134,7 +145,10 @@ impl Report {
             }
             return Ok(());
         }
-        let parts = text::segments(cell.left.unwrap_or(""), cell.right.unwrap_or(""));
+        let parts = text::segments(
+            left.as_deref().unwrap_or(""),
+            right.as_deref().unwrap_or(""),
+        );
         let combined: String = parts.iter().map(|part| part.value.as_str()).collect();
         // Replacements show removed + inserted text in the same cell.
         // Validate the rendered text too: two valid inputs may exceed the XLSX limit together.
@@ -225,6 +239,7 @@ impl Report {
                 "Cell text",
                 "Removed and inserted segments are combined; this is a visual diff".into(),
             ),
+            ("Compare quotes", if self.compare_quotes { "Enabled; display CSV field quoting and escaped quotes" } else { "Disabled; compare decoded values only" }.into()),
         ];
         for (row, (label, value)) in entries.iter().enumerate() {
             sheet.write_string(row as u32, 0, *label)?;

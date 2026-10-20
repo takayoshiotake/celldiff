@@ -53,6 +53,9 @@ struct Args {
     /// Cell address style for --text
     #[arg(long, value_enum, default_value = "a1", value_name = "STYLE")]
     address: AddressStyle,
+    /// Also compare whether CSV fields were enclosed in quotes
+    #[arg(long, conflicts_with = "list_encodings")]
+    compare_quotes: bool,
 }
 
 fn run(args: Args) -> Result<bool, AppError> {
@@ -64,8 +67,10 @@ fn run(args: Args) -> Result<bool, AppError> {
     let left_path = args.left.as_ref().expect("left required by clap");
     let right_path = args.right.as_ref().expect("right required by clap");
     let output = &args.output;
-    let mut left = CsvInput::open_encoded(left_path, args.encoding_left)?;
-    let mut right = CsvInput::open_encoded(right_path, args.encoding_right)?;
+    let mut left =
+        CsvInput::open_encoded_with_quotes(left_path, args.encoding_left, args.compare_quotes)?;
+    let mut right =
+        CsvInput::open_encoded_with_quotes(right_path, args.encoding_right, args.compare_quotes)?;
     if args.text {
         let stdout = std::io::stdout();
         let mut report = TextReport::new(stdout.lock(), args.oneline, args.address);
@@ -77,7 +82,7 @@ fn run(args: Args) -> Result<bool, AppError> {
         return Ok(summary.changed_cells != 0);
     }
     validate_paths(left_path, right_path, output, args.force)?;
-    let mut report = Report::new()?;
+    let mut report = Report::new_with_quotes(args.compare_quotes)?;
     let summary = compare_all(&mut left, &mut right, |d| report.write(d))?;
     report.save(
         output,

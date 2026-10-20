@@ -1,6 +1,7 @@
 //! Positional CSV comparison with borrowed cell values and a streaming sink.
 use crate::{AppError, input::CsvInput};
 use csv::StringRecord;
+use std::borrow::Cow;
 use std::io::Read;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,14 +20,43 @@ impl ChangeKind {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct QuoteInfo {
+    pub left: bool,
+    pub right: bool,
+}
+
 #[derive(Debug)]
 pub struct CellDifference<'a> {
     pub record: u64,
     pub column: usize,
     pub left: Option<&'a str>,
     pub right: Option<&'a str>,
+    pub quotes: Option<QuoteInfo>,
 }
-impl CellDifference<'_> {
+fn csv_display(value: Option<&str>, quoted: bool) -> Option<Cow<'_, str>> {
+    value.map(|value| {
+        if quoted {
+            Cow::Owned(format!("\"{}\"", value.replace('"', "\"\"")))
+        } else {
+            Cow::Borrowed(value)
+        }
+    })
+}
+
+impl<'a> CellDifference<'a> {
+    pub fn differs(&self) -> bool {
+        self.left != self.right || self.quotes.is_some_and(|q| q.left != q.right)
+    }
+
+    pub fn display_left(&self) -> Option<Cow<'a, str>> {
+        csv_display(self.left, self.quotes.is_some_and(|q| q.left))
+    }
+
+    pub fn display_right(&self) -> Option<Cow<'a, str>> {
+        csv_display(self.right, self.quotes.is_some_and(|q| q.right))
+    }
+
     pub fn kind(&self) -> ChangeKind {
         match (self.left, self.right) {
             (None, Some(_)) => ChangeKind::Added,
@@ -71,6 +101,13 @@ fn compare_impl<R: Read, S: Read>(
     include_unchanged: bool,
     mut emit: impl FnMut(CellDifference<'_>) -> Result<(), AppError>,
 ) -> Result<Summary, AppError> {
+    if left.compares_quotes() != right.compares_quotes() {
+        return Err(std::io::Error::other(
+            "Both inputs must use the same quote comparison setting",
+        )
+        .into());
+    }
+    let compare_quotes = left.compares_quotes();
     let mut old = StringRecord::new();
     let mut new = StringRecord::new();
     let mut summary = Summary::default();
@@ -89,7 +126,11 @@ fn compare_impl<R: Read, S: Read>(
         for index in 0..width {
             let old_value = old_number.and_then(|_| old.get(index));
             let new_value = new_number.and_then(|_| new.get(index));
-            let differs = old_value != new_value;
+            let quotes = compare_quotes.then(|| QuoteInfo {
+                left: old_number.is_some() && left.is_quoted(index),
+                right: new_number.is_some() && right.is_quoted(index),
+            });
+            let differs = old_value != new_value || quotes.is_some_and(|q| q.left != q.right);
             if !differs && !include_unchanged {
                 continue;
             }
@@ -98,6 +139,7 @@ fn compare_impl<R: Read, S: Read>(
                 column: index + 1,
                 left: old_value,
                 right: new_value,
+                quotes,
             };
             if differs {
                 match difference.kind() {

@@ -54,6 +54,27 @@ with tempfile.TemporaryDirectory() as folder:
     text_equal = subprocess.run([str(binary), str(left), str(left), "--text"],
         cwd=folder, encoding="utf-8", capture_output=True)
     assert text_equal.returncode == 0 and text_equal.stdout == "No differences.\n"
+    quote_left = Path(folder) / "quote-left.csv"
+    quote_right = Path(folder) / "quote-right.csv"
+    quote_left.write_bytes(b'1,\n')
+    quote_right.write_bytes(b'"1",""\n')
+    default_quotes = subprocess.run([str(binary), str(quote_left), str(quote_right), "--text"],
+        cwd=folder, encoding="utf-8", capture_output=True)
+    assert default_quotes.returncode == 0 and default_quotes.stdout == "No differences.\n"
+    quoted = subprocess.run([str(binary), str(quote_left), str(quote_right), "--compare-quotes", "--text", "--oneline"],
+        cwd=folder, encoding="utf-8", capture_output=True)
+    assert quoted.returncode == 1, quoted.stderr
+    assert 'A1: "1" [unquoted] -> "1" [quoted]' in quoted.stdout
+    assert 'B1: "" [unquoted] -> "" [quoted]' in quoted.stdout
+    assert "Changed cells: 2 (modified=2, added=0, removed=0)" in quoted.stdout
+    quote_output = Path(folder) / "quotes.xlsx"
+    quoted_xlsx = subprocess.run([str(binary), str(quote_left), str(quote_right), "--compare-quotes", "-o", str(quote_output)],
+        encoding="utf-8", capture_output=True)
+    assert quoted_xlsx.returncode == 1, quoted_xlsx.stderr
+    with zipfile.ZipFile(quote_output) as archive:
+        quote_grid = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+        quote_cell = quote_grid.find(".//s:c[@r='A1']", ns)
+        assert "".join(n.text or "" for n in quote_cell.findall(".//s:t", ns)) == '"1"'
     target = Path("dist/sample.xlsx")
     target.parent.mkdir(exist_ok=True)
     target.write_bytes(output.read_bytes())
