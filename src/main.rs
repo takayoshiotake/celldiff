@@ -1,11 +1,12 @@
 use celldiff::{
     AppError,
-    compare::compare_all,
+    compare::{compare, compare_all},
+    console::{AddressStyle, TextReport},
     encoding::{InputEncoding, list_encodings},
     input::CsvInput,
     output::{Report, validate_paths},
 };
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches, Parser, error::ErrorKind, parser::ValueSource};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -43,6 +44,15 @@ struct Args {
     /// List supported encoding names and aliases, without reading files
     #[arg(long)]
     list_encodings: bool,
+    /// Print changed cells to stdout without creating an XLSX file
+    #[arg(long, conflicts_with_all = ["output", "force", "list_encodings"])]
+    text: bool,
+    /// Print one changed cell per line (requires --text)
+    #[arg(long, requires = "text", conflicts_with = "list_encodings")]
+    oneline: bool,
+    /// Cell address style for --text
+    #[arg(long, value_enum, default_value = "a1", value_name = "STYLE")]
+    address: AddressStyle,
 }
 
 fn run(args: Args) -> Result<bool, AppError> {
@@ -56,6 +66,16 @@ fn run(args: Args) -> Result<bool, AppError> {
     let output = &args.output;
     let mut left = CsvInput::open_encoded(left_path, args.encoding_left)?;
     let mut right = CsvInput::open_encoded(right_path, args.encoding_right)?;
+    if args.text {
+        let stdout = std::io::stdout();
+        let mut report = TextReport::new(stdout.lock(), args.oneline, args.address);
+        let summary = compare(&mut left, &mut right, |cell| {
+            report.write(cell)?;
+            Ok(())
+        })?;
+        report.finish(summary)?;
+        return Ok(summary.changed_cells != 0);
+    }
     validate_paths(left_path, right_path, output, args.force)?;
     let mut report = Report::new()?;
     let summary = compare_all(&mut left, &mut right, |d| report.write(d))?;
@@ -79,8 +99,25 @@ fn run(args: Args) -> Result<bool, AppError> {
     Ok(summary.changed_cells != 0)
 }
 
+fn parse_args() -> Args {
+    let mut command = Args::command();
+    let matches = command.clone().get_matches();
+    // Defaults are not explicit options: ordinary XLSX runs may keep address=a1.
+    if matches.value_source("address") == Some(ValueSource::CommandLine)
+        && !matches.get_flag("text")
+    {
+        command
+            .error(
+                ErrorKind::ArgumentConflict,
+                "--address can only be used with --text",
+            )
+            .exit();
+    }
+    Args::from_arg_matches(&matches).unwrap_or_else(|error| error.exit())
+}
+
 fn main() -> ExitCode {
-    match run(Args::parse()) {
+    match run(parse_args()) {
         Ok(false) => ExitCode::SUCCESS,
         Ok(true) => ExitCode::from(1),
         Err(error) => {

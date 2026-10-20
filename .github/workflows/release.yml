@@ -7,7 +7,7 @@ on:
         description: Existing draft release tag
         required: true
         type: string
-        default: v0.3.0
+        default: v0.4.0
       ci_run_id:
         description: Successful CI run ID on main (artifacts retained for 14 days)
         required: true
@@ -55,7 +55,7 @@ jobs:
           tag = os.environ["RELEASE_TAG"]
           run_id = os.environ["CI_RUN_ID"]
           if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", tag):
-              raise SystemExit("Expected a version tag such as v0.3.0")
+              raise SystemExit("Expected a version tag such as v0.4.0")
           if not run_id.isdecimal():
               raise SystemExit("CI run ID must contain digits only")
           

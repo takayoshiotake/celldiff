@@ -2,7 +2,7 @@
 
 ## 目的と対象
 
-2つのCSVをセル単位で比較し、変更した文字を強調した.xlsxレポートを出力するCLI。
+2つのCSVをセル単位で比較し、変更した文字を強調した.xlsxレポート、または差分セルのテキスト一覧を出力するCLI。
 Rustで実装し、Windows・Linux・macOSへOS別の実行ファイルを配布する。
 GUI、キー照合、行の再対応、マージ、TSV・Excel入力は初期版に含めない。
 
@@ -93,9 +93,26 @@ Summaryに件数・入力・左右の使用文字コード名・凡例を記載�
 すべて文字列として書き、先頭ゼロを保持し、数式・URL・数値を自動判定しない。
 片側だけの余剰レコード・列もその位置に残す。欠落を理由に行列を詰めない。
 
+## テキスト出力
+
+--textを指定するとExcelのReportを作らず、compareで変更セルだけをconsole::TextReportへ逐次渡す。
+標準出力をロックしてWrite経由で出力し、最後のflushまで失敗をResultで呼び出し側へ返す。
+全入力・全差分を蓄積しない。読み込み・比較に失敗した場合はfinishを呼ばず、成功の最終集計を出さない。
+既に標準出力へ書いた部分の取り消しは行わない。
+
+通常は座標と左右の値を複数行で表示する。--onelineは1差分セル1行。
+値はRustの引用符付き文字列表現で制御文字・引用符・バックスラッシュ等をエスケープする。
+Noneは<missing>、Some("")は空の引用符付き文字列として区別する。
+文字単位の色付けは行わない。成功時は変更セル数と種別別件数、差分なしはNo differences.を表示する。
+
+--addressの既定値はa1。a1は1始まりの列をA〜Z、AA〜へ変換し、論理レコード番号を続ける。
+rcはrow=N column=M（両方1始まり）。A1変換を含め、Excelの座標・文字数上限は適用しない。
+入力の位置対応・文字コード・終了コードはExcelと共通。
+--text時は出力先の検証・作成を行わず、既存diff.xlsxにも触れない。
+
 ## 上限と保存
 
-- 入力／出力の座標上限は1,048,576レコード・16,384列。説明用の行列は消費しない。
+- Excel出力時の入力／出力の座標上限は1,048,576レコード・16,384列。説明用の行列は消費しない。
 - 出力するセルは32,767 UTF-16単位を上限とする（補助平面文字は2単位）。
 - 変更のないセル、変更前・変更後の各値、差分をまとめた表示文字列のすべてを検査する。
 - 旧値と新値がそれぞれ上限内でも、まとめた表示が超える場合はエラーとする。
@@ -121,12 +138,18 @@ xlsx生成とZIP圧縮のバッファ・書式・小さなSummaryにもメモリ
 
 `celldiff LEFT RIGHT [-o FILE] [--force] [--encoding-left ENCODING] [--encoding-right ENCODING]`
 
+`celldiff LEFT RIGHT --text [--oneline] [--address a1|rc]`
+
 `celldiff --list-encodings`
 
 - 比較時は入力2件が必須。-o／--outputは省略でき、カレントディレクトリのdiff.xlsxへ出力する。明示指定時は指定先だけに出力する。出力拡張子は.xlsx。
 - 既定出力にも既存ファイル・入力別名の保護、--force、失敗時の既存出力保持を適用する。
 - --list-encodings・ヘルプ・バージョン表示では既定出力を生成しない。
 - --list-encodingsは入力・出力先なしで対応名と別名を表示し、0で終了する。
+- --textは明示的な-o／--output、--force、--list-encodingsと競合する。既定の出力先値は競合扱いにしない。
+- --onelineは--textを必要とする。--addressも明示指定時だけ--textを必要とし、既定値a1は通常のExcel実行を妨げない。
+- --list-encodingsと--oneline／明示的な--addressは併用不可。不明なaddress値も引数エラー。
+- --format・--mode・--summaryは追加しない。
 - --encoding-left／--encoding-rightの公開別名は--el／--er。ヘルプに両方を表示する。
 - clapがヘルプ、バージョン、引数エラーを生成する。
 - 終了コード0:差分なし、1:差分あり、2:実行エラー。
@@ -147,7 +170,7 @@ xlsx生成とZIP圧縮のバッファ・書式・小さなSummaryにもメモリ
 | same-file | OSを跨ぐ同一ファイル判定 |
 | zip / roxmltree（テストのみ） | xlsxのZIPとXMLの値・書式を検証 |
 
-単一Cargoパッケージ内でencoding、input、compare、text、output、mainに責務を分ける。
+単一Cargoパッケージ内でencoding、input、compare、text、output、console、mainに責務を分ける。
 Cargo.tomlに依存・配布設定、Cargo.lockに正確な解決バージョンを記録する。
 Excel、Git、Pythonは配布exeの実行要件ではない。
 

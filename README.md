@@ -1,6 +1,6 @@
 # celldiff
 
-CSVをセル単位で比較し、文字単位の変更を強調したExcelレポートを出力するRust製CLIです。
+CSVをセル単位で比較し、文字単位の変更を強調したExcelレポートや、差分セルのテキスト一覧を出力するRust製CLIです。
 
 ## 使用方法
 
@@ -20,6 +20,42 @@ celldiff --list-encodings
 - `-o`／`--output`は省略可能で、既定の出力先はカレントディレクトリの`diff.xlsx`です。
 - 既存の出力は既定では上書きしません。`--force`でも入力ファイルとその別名は保護します。
 - GUI、キー照合、マージ、TSV・Excel入力はありません。
+
+## テキスト出力
+
+```sh
+celldiff left.csv right.csv --text
+celldiff left.csv right.csv --text --oneline
+celldiff left.csv right.csv --text --oneline --address rc
+```
+
+`--text`は差分があるセルだけを標準出力へ表示し、Excelファイルを生成しません。
+既存の`diff.xlsx`にも触れません。通常はセルごとに左右の値を複数行で表示し、
+`--oneline`を付けると差分セル1つを1行にします。
+
+```text
+B2: "東京本社" -> "大阪本社"
+D8: <missing> -> ""
+
+Changed cells: 2 (modified=1, added=1, removed=0)
+```
+
+`--address a1|rc`で座標表記を切り替えます。既定は`a1`（例: B2）、
+`rc`では`row=2 column=2`と表示します。先頭レコード・列はA1、またはrow=1 column=1です。
+rowは物理行ではなく、CSVの論理レコード番号です。
+値は引用符で囲み、欠落は`<missing>`、空文字列は`""`で区別します。
+改行・タブ・引用符・バックスラッシュ・制御文字などはRustの文字列リテラルに準じてエスケープします。
+成功時は末尾に件数を表示し、差分がなければ`No differences.`と表示します。
+
+`--oneline`と明示的な`--address`は`--text`専用です。
+`--text`と明示的な`-o`／`--output`、`--force`、`--list-encodings`の併用は引数エラーです。
+`--list-encodings`と`--oneline`／明示的な`--address`の併用も引数エラーです。
+左右の文字コード指定は利用できます。`--format`・`--mode`・`--summary`は設けていません。
+
+テキスト出力にはExcel固有の行数・列数・セル文字数上限を適用しません。
+終了コードはExcel出力と同じ0／1／2です。標準出力への書き込みやflushの失敗もエラーとします。
+一覧は逐次出力するため、途中で入力エラーが起きると部分的な一覧が残る場合があります。
+その場合は最終集計を表示せず、標準エラーへ原因を出して終了コード2で終了します。
 
 ## 入力文字コード
 

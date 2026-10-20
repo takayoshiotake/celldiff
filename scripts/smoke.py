@@ -37,6 +37,23 @@ with tempfile.TemporaryDirectory() as folder:
     identical = subprocess.run([str(binary), "examples/left.csv", "examples/left.csv", "-o",
         str(Path(folder) / "equal.xlsx")], text=True, capture_output=True)
     assert identical.returncode == 0
+    left = Path("examples/left.csv").resolve()
+    right = Path("examples/right.csv").resolve()
+    existing = set(Path(folder).iterdir())
+    for options, expected in [
+        (["--text"], "B2:\n"),
+        (["--text", "--oneline"], 'B2: "東京本社" -> "大阪本社"'),
+        (["--text", "--oneline", "--address", "rc"], 'row=2 column=2: "東京本社" -> "大阪本社"'),
+    ]:
+        text = subprocess.run([str(binary), str(left), str(right), *options],
+            cwd=folder, encoding="utf-8", capture_output=True)
+        assert text.returncode == 1, text.stderr
+        assert expected in text.stdout, text.stdout
+        assert "Changed cells: 7 " in text.stdout, text.stdout
+        assert set(Path(folder).iterdir()) == existing
+    text_equal = subprocess.run([str(binary), str(left), str(left), "--text"],
+        cwd=folder, encoding="utf-8", capture_output=True)
+    assert text_equal.returncode == 0 and text_equal.stdout == "No differences.\n"
     target = Path("dist/sample.xlsx")
     target.parent.mkdir(exist_ok=True)
     target.write_bytes(output.read_bytes())
